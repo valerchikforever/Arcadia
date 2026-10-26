@@ -1,21 +1,36 @@
 'use strict';
 // Windows system access through PowerShell (registry, process list) — no native modules needed.
 const { execFile } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const isWin = process.platform === 'win32';
+
+// Scripts go through a temporary .ps1 file: passing them on the command line
+// hits the 32 767-character limit of Windows (spawn ENAMETOOLONG) for long zapret strategies.
+let psCounter = 0;
+function writeTempScript(script, prefix = 'arcadia') {
+  const file = path.join(os.tmpdir(), `${prefix}-${process.pid}-${Date.now()}-${psCounter++}.ps1`);
+  // UTF-8 with BOM, otherwise Windows PowerShell 5.1 misreads Cyrillic paths
+  fs.writeFileSync(file, '\uFEFF' + script, 'utf8');
+  return file;
+}
 
 function runPS(script, timeout = 30000) {
   return new Promise((resolve, reject) => {
     if (!isWin) return resolve('');
     const full = '[Console]::OutputEncoding=[Text.Encoding]::UTF8\n$ProgressPreference="SilentlyContinue"\n' + script;
-    const encoded = Buffer.from(full, 'utf16le').toString('base64');
+    let file;
+    try { file = writeTempScript(full); } catch (e) { return reject(e); }
     execFile(
       'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file],
       { windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout, encoding: 'utf8' },
       (err, stdout) => {
+        fs.rm(file, { force: true }, () => {});
         if (err && !stdout) return reject(err);
-        resolve(String(stdout || '').replace(/^﻿/, ''));
+        resolve(String(stdout || '').replace(/^\uFEFF/, ''));
       }
     );
   });
@@ -66,4 +81,4 @@ async function listProcessPaths() {
   return out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
 }
 
-module.exports = { runPS, readRegistry, listProcessPaths, isWin };
+module.exports = { writeTempScript, runPS, readRegistry, listProcessPaths, isWin };
