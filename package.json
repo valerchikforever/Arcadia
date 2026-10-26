@@ -1,0 +1,36 @@
+{
+  "name": "arcadia-launcher",
+  "productName": "Arcadia",
+  "version": "1.2.0",
+  "description": "Единый лаунчер для всех игр: Steam, Epic, GOG, EA, Ubisoft, Battle.net, BattleState и игры из папок",
+  "main": "src/main/main.js",
+  "author": "Ilnar",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/run.js && node test/net.js",
+    "dist": "electron-builder --win nsis portable",
+    "dist:dir": "electron-builder --win dir"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.arcadia.launcher",
+    "productName": "Arcadia",
+    "directories": { "output": "dist" },
+    "files": ["src/**/*", "assets/**/*", "package.json"],
+    "win": {
+      "icon": "assets/icon.ico",
+      "signAndEditExecutable": true
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "artifactName": "Arcadia-Setup-${version}.exe"
+    },
+    "portable": { "artifactName": "Arcadia-Portable-${version}.exe" }
+  }
+}
