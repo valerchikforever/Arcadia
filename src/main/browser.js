@@ -39,6 +39,7 @@ class StoreBrowser {
     this.sessions = new Set();
     this.memMB = 0;
     this.memTimer = null;
+    this.full = false;
   }
 
   get cfg() { return this.store.settings.browser; }
@@ -48,6 +49,7 @@ class StoreBrowser {
     win.on('minimize', () => this.schedule(this.cfg.unloadOnMinimizeSec, 'minimized'));
     win.on('restore', () => { this.cancel(); this.ensure(); });
     win.on('show', () => { this.cancel(); this.ensure(); });
+    win.on('leave-full-screen', () => { if (this.full) { this.full = false; this.onChange(); } });
   }
 
   prepareSession(key) {
@@ -91,6 +93,12 @@ class StoreBrowser {
     wc.on('did-navigate-in-page', upd);
     wc.on('page-title-updated', upd);
     wc.on('render-process-gone', () => { this.unload('crashed'); });
+    // keys pressed inside the page: F11 toggles full screen, Esc leaves it
+    wc.on('before-input-event', (e, input) => {
+      if (input.type !== 'keyDown') return;
+      if (input.key === 'F11') { e.preventDefault(); this.setFull(!this.full); }
+      else if (input.key === 'Escape' && this.full && !wc.isFullScreen?.()) { e.preventDefault(); this.setFull(false); }
+    });
     wc.setWindowOpenHandler(({ url }) => {
       if (/^https?:/i.test(url)) wc.loadURL(url); // new tabs open in place: one page = one process
       else if (EXTERNAL_SCHEMES.test(url)) shell.openExternal(url);
@@ -182,7 +190,15 @@ class StoreBrowser {
     this.onChange();
   }
 
+  setFull(on) {
+    const win = this.getWindow();
+    this.full = !!on;
+    if (win && !win.isDestroyed()) win.setFullScreen(this.full);
+    this.onChange();
+  }
+
   disable() {
+    if (this.full) this.setFull(false);
     this.enabled = false;
     this.unload('off');
   }
@@ -227,7 +243,7 @@ class StoreBrowser {
     }
     return {
       enabled: this.enabled, loaded: !!this.view, key: this.key, url: this.url, title: this.title, loading: this.loading,
-      canBack, canFwd, memMB: this.memMB, blocked: this.blocked, unloadedReason: this.unloadedReason,
+      canBack, canFwd, full: this.full, memMB: this.memMB, blocked: this.blocked, unloadedReason: this.unloadedReason,
     };
   }
 }

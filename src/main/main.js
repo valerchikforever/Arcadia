@@ -14,6 +14,7 @@ const { Vpn } = require('./net/vpn');
 const { processNames } = require('./net/elevate');
 const { Accounts } = require('./accounts');
 const { StoreBrowser } = require('./browser');
+const { Installs } = require('./installs');
 
 const ASSETS = path.join(__dirname, '..', '..', 'assets');
 const START_HIDDEN = process.argv.includes('--hidden');
@@ -27,7 +28,7 @@ if (!app.requestSingleInstanceLock()) {
 
 app.setAppUserModelId('com.arcadia.launcher');
 
-let win = null, tray = null, store, meta, tracker, zapret, vpn, accounts, browser;
+let win = null, tray = null, store, meta, tracker, zapret, vpn, accounts, browser, installs;
 let netCleaned = false;
 let quitting = false, scanning = false, lastError = '';
 let pushTimer = null;
@@ -51,6 +52,7 @@ function snapshot() {
     net: zapret && vpn ? { zapret: zapret.state(), vpn: vpn.state() } : null,
     accounts: accounts ? accounts.state() : null,
     browser: browser ? browser.state() : null,
+    installs: installs ? installs.state() : {},
     platform: process.platform,
     version: app.getVersion(),
   };
@@ -146,7 +148,9 @@ function updateTray() {
   tpl.push({ label: scanning ? 'Сканирование…' : 'Обновить библиотеку', enabled: !scanning, click: runScan });
   tpl.push({ label: 'Выход', click: () => { quitting = true; app.quit(); } });
   tray.setContextMenu(Menu.buildFromTemplate(tpl));
-  tray.setToolTip(running.length ? `Arcadia — ${displayName(running[0])}` : 'Arcadia');
+  const dl = installs ? Object.entries(installs.state()) : [];
+  const dlTip = dl.length ? `\nЗагрузка: ${dl.map(([id, p]) => `${store.get(id) ? displayName(store.get(id)) : p.name} ${Math.floor(p.pct)}%`).join(', ')}` : '';
+  tray.setToolTip((running.length ? `Arcadia — ${displayName(running[0])}` : 'Arcadia') + dlTip);
 }
 
 function createTray() {
@@ -232,6 +236,7 @@ async function doLaunch(id) {
     // Bought but not installed: the official client downloads it
     if (!g.installUri) return { ok: false, error: 'Неизвестно, как установить эту игру' };
     try { await shell.openExternal(g.installUri); } catch (e) { return { ok: false, error: `Не удалось открыть лаунчер: ${e.message}` }; }
+    installs.kick();
     return { ok: true, install: true };
   }
   try {
@@ -346,7 +351,7 @@ function registerIpc() {
     return { ok: true };
   });
   h('app:open-data', () => { shell.openPath(app.getPath('userData')); return { ok: true }; });
-  h('app:open-url', (url) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { ok: true }; });
+  h('app:open-url', (url) => { if (/^https:\/\//.test(url) || url === 'steam://open/downloads') shell.openExternal(url); return { ok: true }; });
   h('app:quit', () => { quitting = true; app.quit(); });
 
   // store accounts
@@ -369,6 +374,7 @@ function registerIpc() {
   h('br:unload', () => { browser.unload('manual'); return { ok: true }; });
   h('br:disable', () => { browser.disable(); return { ok: true }; });
   h('br:external', () => { browser.openExternal(); return { ok: true }; });
+  h('br:full', (on) => { browser.setFull(!!on); return { ok: true }; });
   h('br:set', (patch) => {
     store.settings.browser = { ...store.settings.browser, ...patch };
     store.save();
@@ -443,6 +449,16 @@ async function init() {
   zapret = new Zapret(store, { onChange: push, log });
   accounts = new Accounts(store, { fetch: (u, o) => net.fetch(u, o), log, onChange: push, getWindow: () => win });
   browser = new StoreBrowser(store, { getWindow: () => win, onChange: push, log });
+  installs = new Installs(store, {
+    onChange: push, log,
+    isVisible: () => !!win && win.isVisible() && !win.isMinimized(),
+    // a download finished: rescan so the game turns into an installed one
+    onFinished: (id) => {
+      const g = store.get(id);
+      if (g && g.installed === false) setTimeout(runScan, 1500);
+      updateTray();
+    },
+  });
   vpn = new Vpn(store, {
     onChange: push, log, fetch: (u, o) => net.fetch(u, o), dataDir: app.getPath('userData'),
     getGameDirs: () => Object.values(store.games).filter((g) => !g.missing && g.installed !== false && g.installDir).map((g) => g.installDir),
@@ -455,6 +471,7 @@ async function init() {
   applyAutostart();
   tracker.start();
   pollNet();
+  installs.start();
   if (store.settings.scanOnStart || !Object.keys(store.games).length) setTimeout(runScan, 600);
   // owned libraries: refresh at most once in 12 hours, a bit after start
   if (store.settings.syncAccountsOnStart) {

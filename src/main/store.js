@@ -22,7 +22,8 @@ const DEFAULT_SETTINGS = {
   vpn: { servers: [], subs: [], selected: 'auto', mode: 'proxy', directRu: true, gamesDirect: true, autostart: false, stopOnExit: true, port: 2080 },
   accounts: {},
   steamApiKey: '',
-  showUninstalled: false,
+  hideUninstalled: false,
+  installFilter: 'all',
   syncAccountsOnStart: true,
   browser: { economy: true, blockTrackers: true, autoEnable: false, unloadOnMinimizeSec: 60, unloadOnLeaveSec: 30 },
 };

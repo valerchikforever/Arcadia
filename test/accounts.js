@@ -88,4 +88,18 @@ t('tracker blocklist', () => {
   for (const u of ['https://www.google-analytics.com/g/collect', 'https://stats.g.doubleclick.net/x', 'https://mc.yandex.ru/watch/1', 'https://cdn.cookielaw.org/consent.js']) assert.ok(blockRe.test(u), u);
   for (const u of ['https://store.steampowered.com/', 'https://shared.cloudflare.steamstatic.com/a.jpg', 'https://store.epicgames.com/ru/', 'https://notdoubleclick.net.example.com/']) assert.ok(!blockRe.test(u), u);
 });
+console.log('steam downloads');
+const { progressFromManifest } = require('../src/main/installs');
+t('download progress from appmanifest', () => {
+  const p = progressFromManifest({ StateFlags: '1026', BytesToDownload: '8000', BytesDownloaded: '2000', BytesToStage: '9000', BytesStaged: '0' });
+  assert.deepStrictEqual([p.phase, p.pct, p.paused], ['download', 25, false]);
+  const inst = progressFromManifest({ StateFlags: String(1024 | 2 | 2097152), BytesToDownload: '8000', BytesDownloaded: '8000', BytesToStage: '9000', BytesStaged: '4500' });
+  assert.deepStrictEqual([inst.phase, inst.pct], ['install', 50]);
+  const paused = progressFromManifest({ StateFlags: String(2 | 512), BytesToDownload: '100', BytesDownloaded: '10' });
+  assert.ok(paused.paused);
+  assert.strictEqual(progressFromManifest({ StateFlags: '4', BytesToDownload: '100', BytesDownloaded: '100' }), null);
+  assert.strictEqual(progressFromManifest({ StateFlags: '4' }), null);
+  const upd = progressFromManifest({ StateFlags: String(4 | 1024 | 1048576), BytesToDownload: '500', BytesDownloaded: '100' });
+  assert.strictEqual(upd.pct, 20);
+});
 console.log(`\n${passed} passed`);

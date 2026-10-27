@@ -69,6 +69,7 @@ function browserFrame(key, a) {
       ${B.loaded ? `<span class="pill" title="Память процесса страницы">${I.cpu}${B.memMB ? `${B.memMB} МБ` : '…'}</span>` : ''}
       ${B.blocked ? `<span class="pill" title="Заблокировано запросов рекламы, трекеров и видео">${I.shield}${B.blocked}</span>` : ''}
       <button class="icon-btn sm" data-sa="external" title="Открыть в обычном браузере">${I.ext}</button>
+      <button class="btn sm${B.full ? ' primary' : ''}" data-sa="full" title="${B.full ? 'Выйти из полноэкранного режима (Esc)' : 'На весь экран (F11)'}">${B.full ? I.shrink : I.expand}${B.full ? 'Свернуть' : 'На весь экран'}</button>
       <button class="btn sm ghost" data-sa="br-off" title="Выгрузить страницу и выключить браузерный режим">${I.power}Выключить</button>
     </div>` : '';
   let ph;
@@ -109,6 +110,7 @@ function renderStore() {
 
 // Position the native page view over #browserHost (or hide it while anything covers that area)
 function syncBrowser() {
+  syncFull();
   const B = S.browser || {};
   const host = $('#browserHost');
   const covered = $('#modalRoot').children.length || !$('#ctx').classList.contains('hidden') || !$('#drop').classList.contains('hidden');
@@ -177,10 +179,25 @@ async function storeAction(b) {
   if (sa === 'nav') return api.br.nav(b.dataset.nav);
   if (sa === 'external') return api.br.external();
   if (sa === 'br-off') return api.br.disable();
+  if (sa === 'full') return api.br.full(!(S.browser && S.browser.full));
   if (sa === 'br-settings') return settingsModal('browser');
 }
 
+// Full-screen page: the frame covers the whole window, the window goes full screen
+function syncFull() {
+  const B = S.browser || {};
+  const onStore = !ui.detail && ui.view === 'store';
+  document.body.classList.toggle('br-full', !!B.full && onStore);
+  if (B.full && !onStore) api.br.full(false); // left the section — leave full screen too
+}
+
 (function bindStore() {
+  document.addEventListener('keydown', (e) => {
+    const B = S.browser || {};
+    if (ui.view !== 'store' || ui.detail || !B.enabled) return;
+    if (e.key === 'F11') { e.preventDefault(); api.br.full(!B.full); }
+    else if (e.key === 'Escape' && B.full && !$('#modalRoot').children.length) { e.preventDefault(); e.stopImmediatePropagation(); api.br.full(false); }
+  }, true);
   $('#view').addEventListener('click', (e) => {
     const b = e.target.closest('[data-sa]');
     if (b && !b.disabled) { e.stopPropagation(); storeAction(b); }

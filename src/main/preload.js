@@ -46,7 +46,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   br: {
     open: call('br:open'), bounds: call('br:bounds'), nav: call('br:nav'), unload: call('br:unload'),
-    disable: call('br:disable'), external: call('br:external'), set: call('br:set'),
+    disable: call('br:disable'), external: call('br:external'), set: call('br:set'), full: call('br:full'),
   },
   fileUrl: (p, v) => {
     if (!p) return '';
