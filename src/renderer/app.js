@@ -29,6 +29,9 @@ const srcOf = (g) => SOURCES[g.source] || { label: g.source, color: '#aaa' };
 const img = (p, g) => (p ? api.fileUrl(p, g && g.mediaVersion) : '');
 const games = () => Object.values(S.games);
 const isRunning = (id) => S.running.includes(id);
+const inst = (g) => g.installed !== false;
+const coverSrc = (g) => (g.coverPath ? img(g.coverPath, g) : g.coverUrl || '');
+const heroSrc = (g) => (g.heroPath ? img(g.heroPath, g) : g.heroUrl || (g.coverPath ? img(g.coverPath, g) : g.coverUrl || ''));
 const norm = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е');
 
 function fmtTime(sec, empty = '') {
@@ -65,16 +68,20 @@ function viewGames(view = ui.view) {
     if (view === 'favorites') list = list.filter((g) => g.favorite);
     else if (view === 'recent') list = list.filter((g) => lastOf(g));
     else if (view === 'missing') list = list.filter((g) => g.missing);
+    else if (view === 'uninstalled') list = list.filter((g) => !inst(g));
     else if (view.startsWith('src:')) list = list.filter((g) => g.source === view.slice(4));
     else if (view.startsWith('col:')) list = list.filter((g) => (g.collections || []).includes(view.slice(4)));
     if (view !== 'missing' && !view.startsWith('src:')) list = list.filter((g) => !g.missing || (g.collections || []).length || g.favorite);
+    // bought-but-not-installed games: own section; in «Все игры» only if the user wants them there
+    if (view === 'recent' || (view === 'all' && !S.settings.showUninstalled)) list = list.filter(inst);
   }
   if (ui.search) {
     const q = norm(ui.search);
     list = list.filter((g) => norm(nameOf(g)).includes(q) || norm(g.developer).includes(q));
   }
   const sort = view === 'recent' ? 'recent' : S.settings.sort || 'name';
-  const byName = (a, b) => nameOf(a).localeCompare(nameOf(b), 'ru', { sensitivity: 'base', numeric: true });
+  const byName0 = (a, b) => nameOf(a).localeCompare(nameOf(b), 'ru', { sensitivity: 'base', numeric: true });
+  const byName = (a, b) => (inst(b) - inst(a)) || byName0(a, b); // installed first
   const cmp = {
     name: byName,
     recent: (a, b) => lastOf(b) - lastOf(a) || byName(a, b),
@@ -90,6 +97,8 @@ function viewTitle(view) {
   if (view === 'recent') return 'Недавние';
   if (view === 'hidden') return 'Скрытые';
   if (view === 'missing') return 'Не найдены';
+  if (view === 'uninstalled') return 'Не установлены';
+  if (view === 'store') return 'Магазины';
   if (view === 'stats') return 'Статистика';
   if (view.startsWith('src:')) return (SOURCES[view.slice(4)] || {}).label || view.slice(4);
   if (view.startsWith('col:')) { const c = S.collections.find((x) => x.id === view.slice(4)); return c ? c.name : 'Коллекция'; }
@@ -104,12 +113,14 @@ function navItem(view, icon, label, count, extra = '') {
 
 function renderNav() {
   const all = games();
-  const vis = all.filter((g) => !g.hidden && !g.missing);
+  const vis = all.filter((g) => !g.hidden && !g.missing && (inst(g) || S.settings.showUninstalled));
   const cnt = (f) => vis.filter(f).length;
   let html = '<div class="nav-group">';
   html += navItem('all', I.grid, 'Все игры', vis.length);
   html += navItem('favorites', I.heart, 'Избранное', cnt((g) => g.favorite));
-  html += navItem('recent', I.recent, 'Недавние', cnt((g) => lastOf(g)));
+  html += navItem('recent', I.recent, 'Недавние', cnt((g) => lastOf(g) && inst(g)));
+  const unin = all.filter((g) => !inst(g) && !g.hidden).length;
+  if (unin) html += navItem('uninstalled', I.download, 'Не установлены', unin);
   html += navItem('stats', I.chart, 'Статистика');
   const hid = all.filter((g) => g.hidden).length;
   if (hid) html += navItem('hidden', I.eyeOff, 'Скрытые', hid);
@@ -119,6 +130,10 @@ function renderNav() {
   if (n) {
     const dots = `<span class="net-dots"><i class="${n.zapret.running ? 'on' : ''}" title="zapret"></i><i class="${n.vpn.running ? 'on' : ''}" title="VPN"></i></span>`;
     html += `<button class="nav-item" data-act="net">${I.shield}<span class="lbl">Обход блокировок</span>${dots}</button>`;
+  }
+  if (S.accounts) {
+    const signed = Object.values(S.accounts).filter((a) => a.account).length;
+    html += navItem('store', I.store, 'Магазины и аккаунты', signed ? `${signed} ${I.userMini}` : undefined);
   }
   html += '</div>';
 
@@ -142,22 +157,23 @@ function renderNav() {
 
 // ---------------- library ----------------
 function coverHtml(g, cls = 'art') {
-  if (g.coverPath) return `<img class="${cls}" src="${esc(img(g.coverPath, g))}" loading="lazy" draggable="false">`;
+  const c = coverSrc(g);
+  if (c) return `<img class="${cls}" src="${esc(c)}" loading="lazy" draggable="false">`;
   return `<div class="fallback" style="--h:${hue(nameOf(g))}">${g.iconPath ? `<img src="${esc(img(g.iconPath, g))}" draggable="false">` : ''}<span>${esc(nameOf(g))}</span></div>`;
 }
 
 function cardHtml(g) {
   const src = srcOf(g);
   const run = isRunning(g.id);
-  const sub = run ? 'Запущено' : g.missing ? 'Не найдена' : ptOf(g) ? fmtTime(ptOf(g)) : 'Не запускалась';
-  return `<div class="card${run ? ' running' : ''}${g.missing ? ' missing' : ''}" data-id="${esc(g.id)}" tabindex="0" draggable="true">
+  const sub = run ? 'Запущено' : g.missing ? 'Не найдена' : !inst(g) ? `Не установлена${ptOf(g) ? ' · ' + fmtTime(ptOf(g)) : ''}` : ptOf(g) ? fmtTime(ptOf(g)) : 'Не запускалась';
+  return `<div class="card${run ? ' running' : ''}${g.missing ? ' missing' : ''}${inst(g) ? '' : ' uninst'}" data-id="${esc(g.id)}" tabindex="0" draggable="true">
     <div class="cover">
-      ${g.coverPath ? `<div class="fallback" style="--h:${hue(nameOf(g))}"><span>${esc(nameOf(g))}</span></div>` : ''}
+      ${coverSrc(g) ? `<div class="fallback" style="--h:${hue(nameOf(g))}"><span>${esc(nameOf(g))}</span></div>` : ''}
       ${coverHtml(g)}
       <div class="shade"></div>
       <span class="badge" style="--c:${src.color}">${esc(src.short || src.label)}</span>
       <button class="fav-btn${g.favorite ? ' on' : ''}" data-act="fav" title="Избранное">${g.favorite ? I.heartFill : I.heart}</button>
-      ${run ? '<span class="live">Запущено</span>' : `<button class="play-btn" data-act="play">${I.play}Играть</button>`}
+      ${run ? '<span class="live">Запущено</span>' : inst(g) ? `<button class="play-btn" data-act="play">${I.play}Играть</button>` : `<button class="play-btn install" data-act="play">${I.download}Установить</button>`}
     </div>
     <div class="meta"><div class="title" title="${esc(nameOf(g))}">${esc(nameOf(g))}</div><div class="subline">${esc(sub)}</div></div>
   </div>`;
@@ -165,7 +181,7 @@ function cardHtml(g) {
 
 function continueHtml() {
   if (ui.view !== 'all' || ui.search) return '';
-  const recent = games().filter((g) => !g.hidden && !g.missing && lastOf(g) > Date.now() - 45 * 864e5)
+  const recent = games().filter((g) => !g.hidden && !g.missing && inst(g) && lastOf(g) > Date.now() - 45 * 864e5)
     .sort((a, b) => lastOf(b) - lastOf(a)).slice(0, 4);
   if (recent.length < 2) return '';
   return `<div class="section-label" style="padding-top:4px">Продолжить играть</div><div class="continue">${recent.map((g) => {
@@ -204,14 +220,14 @@ function renderDetail() {
   if (!g) { ui.detail = null; return renderLibrary(); }
   const src = srcOf(g);
   const run = isRunning(g.id);
-  const heroBg = g.heroPath || g.coverPath;
+  const heroUrl = heroSrc(g);
   const year = (String(g.releaseDate || '').match(/\d{4}/) || [])[0];
   const sessions = [...(g.sessions || [])].reverse().slice(0, 8);
   const L = g.launchOverride && (g.launchOverride.path || g.launchOverride.uri) ? g.launchOverride : g.launch || {};
   const how = L.type === 'uri' ? L.uri : `${L.path || ''}${L.args ? ' ' + L.args : ''}`;
   const steamNote = g.source === 'steam' && g.importedPlaytime ? '<div class="sub" style="font-size:12px;color:var(--text-3);margin-top:-14px;margin-bottom:18px">Время в игре учитывает статистику Steam</div>' : '';
   return `<div class="detail">
-    <div class="hero${g.heroPath ? '' : ' blur'}" style="${heroBg ? `background-image:url('${esc(img(heroBg, g))}')` : `background:linear-gradient(135deg,hsl(${hue(nameOf(g))} 45% 22%),var(--bg))`}">
+    <div class="hero${g.heroPath || g.heroUrl ? '' : ' blur'}" style="${heroUrl ? `background-image:url('${esc(heroUrl)}')` : `background:linear-gradient(135deg,hsl(${hue(nameOf(g))} 45% 22%),var(--bg))`}">
       <button class="btn back-btn" data-act="back">${I.back}Назад</button>
     </div>
     <div class="detail-body">
@@ -221,7 +237,7 @@ function renderDetail() {
         <h1>${esc(nameOf(g))}</h1>
         ${g.missing ? `<div class="warn-box">${I.alert}<span>Игра не найдена при последнем сканировании — возможно, её удалили или перенесли. Укажите новый путь в «Изменить» или удалите из библиотеки.</span></div>` : ''}
         <div class="actions">
-          ${run ? `<span class="running-note"><span class="live" style="position:static">Запущено</span></span>` : `<button class="btn primary big" data-act="play">${I.play}Играть</button>`}
+          ${run ? `<span class="running-note"><span class="live" style="position:static">Запущено</span></span>` : inst(g) ? `<button class="btn primary big" data-act="play">${I.play}Играть</button>` : `<button class="btn primary big" data-act="play">${I.download}Установить через ${esc(src.label)}</button>${g.storeUrl ? `<button class="btn big ghost" data-act="store-page">${I.globe}Страница в магазине</button>` : ''}`}
           <button class="icon-btn${g.favorite ? ' on' : ''}" data-act="fav" title="Избранное">${g.favorite ? I.heartFill : I.heart}</button>
           <button class="icon-btn" data-act="edit" title="Изменить">${I.edit}</button>
           <button class="icon-btn" data-act="folder" title="Открыть папку">${I.folder}</button>
@@ -243,7 +259,7 @@ function renderDetail() {
         <div class="info">
           <div class="k">Источник</div><div class="v">${esc(src.label)}</div>
           ${g.installDir ? `<div class="k">Папка</div><div class="v">${esc(g.installDir)}</div>` : ''}
-          <div class="k">Запуск</div><div class="v">${esc(how || '—')}</div>
+          ${inst(g) ? `<div class="k">Запуск</div><div class="v">${esc(how || "—")}</div>` : `<div class="k">Установка</div><div class="v">${esc(g.installUri || "—")}</div>`}
         </div>
       </div>
     </div>
@@ -294,6 +310,7 @@ function render() {
   let html;
   if (ui.detail) html = renderDetail();
   else if (ui.view === 'stats') html = renderStats();
+  else if (ui.view === 'store') html = renderStore();
   else html = renderLibrary();
   if (html !== ui.lastHtml) {
     const top = view.scrollTop;
@@ -311,6 +328,8 @@ function render() {
     $('#pillNet').classList.toggle('active', z || v);
   }
   if (ui.netRefresh) ui.netRefresh();
+  $('#view').classList.toggle('full', !ui.detail && ui.view === 'store');
+  if (typeof syncBrowser === 'function') syncBrowser(); // store.js loads after app.js
   const ms = $('#metaStatus');
   ms.classList.toggle('hidden', !S.metaPending);
   ms.textContent = `Загрузка обложек: ${S.metaPending}`;
@@ -325,6 +344,7 @@ function go(view) {
   ui.lastHtml = '';
   render();
   $('#view').scrollTop = ui.scroll[view] || 0;
+  if (view === 'store' && typeof storeEntered === 'function') storeEntered();
 }
 
 function openDetail(id) {
@@ -346,9 +366,10 @@ function closeDetail() {
 async function play(id) {
   const g = S.games[id];
   if (!g) return;
-  toast(`Запускаем «${nameOf(g)}»…`, 'ok');
+  if (inst(g)) toast(`Запускаем «${nameOf(g)}»…`, 'ok');
   const r = await api.launch(id);
   if (!r || !r.ok) toast((r && r.error) || 'Не удалось запустить игру', 'err');
+  else if (r.install) toast(`Установка открыта в ${srcOf(g).label} — после загрузки игра появится в библиотеке`, 'ok');
 }
 
 async function patchGame(id, patch) {
@@ -594,9 +615,11 @@ function settingsModal(tab = 'library') {
     ['minimizeOnLaunch', 'Сворачивать окно при запуске игры', ''],
     ['trackExternal', 'Учитывать игры, запущенные не через Arcadia', 'Время засчитается, даже если игра запущена из Steam или ярлыка'],
     ['scanOnStart', 'Обновлять библиотеку при запуске', ''],
+    ['showUninstalled', 'Показывать неустановленные игры во «Всех играх»', 'Купленные в аккаунтах игры, которых нет на диске. Они всегда есть в разделе «Не установлены»'],
+    ['syncAccountsOnStart', 'Обновлять списки купленных игр', 'Не чаще раза в 12 часов, через 15 секунд после запуска'],
   ].map(([k, t, d]) => `<div class="toggle-row"><div><div class="t">${t}</div>${d ? `<div class="d">${d}</div>` : ''}</div>${switchHtml(k, !!st[k])}</div>`).join('');
   const body = `
-    <div class="tabs"><button data-tab="library">Библиотека</button><button data-tab="art">Обложки</button><button data-tab="behavior">Поведение</button><button data-tab="about">Данные</button></div>
+    <div class="tabs"><button data-tab="library">Библиотека</button><button data-tab="art">Обложки</button><button data-tab="behavior">Поведение</button><button data-tab="browser">Браузер</button><button data-tab="about">Данные</button></div>
     <div class="body">
       <div data-pane="library">
         <div class="field"><label>Папки с играми без лаунчера (торренты, репаки, портативные)</label>
@@ -616,6 +639,14 @@ function settingsModal(tab = 'library') {
         ${beh}
         <div class="toggle-row"><div><div class="t">Горячая клавиша для показа Arcadia</div><div class="d">Нажмите сочетание в поле. Backspace — отключить.</div></div><input class="input" id="hk" style="width:220px;text-align:center" readonly value="${esc(prettyHotkey(st.hotkey))}"></div>
       </div>
+      <div data-pane="browser" class="hidden">
+        <div class="hint" style="margin:0 0 6px">Страницы магазинов загружаются только по кнопке «Включить браузерный режим» в разделе «Магазины» и полностью выгружаются, когда не видны. Вход в аккаунты сохраняется.</div>
+        <div class="toggle-row"><div><div class="t">Экономный режим</div><div class="d">Не загружать видео и трейлеры, без автовоспроизведения и WebGL — меньше нагрузка на процессор и видеокарту</div></div>${switchHtml('browser.economy', st.browser.economy)}</div>
+        <div class="toggle-row"><div><div class="t">Блокировать рекламу и трекеры</div><div class="d">Счётчики, аналитика и рекламные скрипты не загружаются</div></div>${switchHtml('browser.blockTrackers', st.browser.blockTrackers)}</div>
+        <div class="toggle-row"><div><div class="t">Включать браузер автоматически</div><div class="d">Страницы будут грузиться сразу при открытии раздела «Магазины», без нажатия кнопки</div></div>${switchHtml('browser.autoEnable', st.browser.autoEnable)}</div>
+        <div class="toggle-row"><div><div class="t">Выгружать страницу, если уйти из «Магазинов»</div><div class="d">Через сколько секунд освободить память</div></div><select class="input" style="width:130px" data-bkey="unloadOnLeaveSec">${[[0, 'Сразу'], [30, '30 сек'], [120, '2 мин'], [600, '10 мин']].map(([v, l]) => `<option value="${v}" ${st.browser.unloadOnLeaveSec === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div class="toggle-row"><div><div class="t">Выгружать при сворачивании окна</div><div class="d">При скрытии в трей страница выгружается всегда</div></div><select class="input" style="width:130px" data-bkey="unloadOnMinimizeSec">${[[0, 'Сразу'], [60, '1 мин'], [300, '5 мин']].map(([v, l]) => `<option value="${v}" ${st.browser.unloadOnMinimizeSec === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      </div>
       <div data-pane="about" class="hidden">
         <div class="toggle-row"><div><div class="t">Папка с данными</div><div class="d">Библиотека, обложки и журнал работы</div></div><button class="btn" id="openData">${I.folder}Открыть</button></div>
         <div class="toggle-row"><div><div class="t">Вернуть удалённые игры</div><div class="d">Удалённых из библиотеки: ${(st.ignoredIds || []).length}. Они снова появятся после сканирования.</div></div><button class="btn" id="unignore" ${(st.ignoredIds || []).length ? '' : 'disabled'}>Вернуть</button></div>
@@ -630,8 +661,11 @@ function settingsModal(tab = 'library') {
   showTab(tab);
   $$('.tabs button', el).forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
   el.addEventListener('change', async (e) => {
+    const bk = e.target.dataset && e.target.dataset.bkey;
+    if (bk) return api.br.set({ [bk]: Number(e.target.value) });
     const k = e.target.dataset && e.target.dataset.key;
     if (!k) return;
+    if (k.startsWith('browser.')) return api.br.set({ [k.slice(8)]: e.target.checked });
     const v = e.target.checked;
     const patch = k.startsWith('sources.') ? { sources: { [k.slice(8)]: v } } : { [k]: v };
     await api.setSettings(patch);
@@ -764,6 +798,7 @@ function bind() {
       if (a === 'back') return closeDetail();
       if (a === 'edit') return editModal(id);
       if (a === 'folder') return api.openFolder(id);
+      if (a === 'store-page') { const g = S.games[id]; return openStorePage(g.source, g.storeUrl); }
       if (a === 'more') { const r = actEl.getBoundingClientRect(); return showCtx(id, r.left, r.bottom + 6); }
       if (a === 'toggle-col') return toggleCollection(id, actEl.dataset.col);
       if (a === 'new-col-for') return newCollection(id);

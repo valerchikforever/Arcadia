@@ -12,6 +12,8 @@ const { exists } = require('./util/common');
 const { Zapret, detectDirs } = require('./net/zapret');
 const { Vpn } = require('./net/vpn');
 const { processNames } = require('./net/elevate');
+const { Accounts } = require('./accounts');
+const { StoreBrowser } = require('./browser');
 
 const ASSETS = path.join(__dirname, '..', '..', 'assets');
 const START_HIDDEN = process.argv.includes('--hidden');
@@ -25,7 +27,7 @@ if (!app.requestSingleInstanceLock()) {
 
 app.setAppUserModelId('com.arcadia.launcher');
 
-let win = null, tray = null, store, meta, tracker, zapret, vpn;
+let win = null, tray = null, store, meta, tracker, zapret, vpn, accounts, browser;
 let netCleaned = false;
 let quitting = false, scanning = false, lastError = '';
 let pushTimer = null;
@@ -47,6 +49,8 @@ function snapshot() {
     metaPending: meta ? meta.pending() : 0,
     lastError,
     net: zapret && vpn ? { zapret: zapret.state(), vpn: vpn.state() } : null,
+    accounts: accounts ? accounts.state() : null,
+    browser: browser ? browser.state() : null,
     platform: process.platform,
     version: app.getVersion(),
   };
@@ -115,7 +119,7 @@ function displayName(g) { return g.customName || g.name; }
 
 function updateTray() {
   if (!tray) return;
-  const games = Object.values(store.games).filter((g) => !g.hidden && !g.missing);
+  const games = Object.values(store.games).filter((g) => !g.hidden && !g.missing && g.installed !== false);
   const recent = games
     .filter((g) => g.lastPlayed || g.lastLaunched || g.importedLastPlayed)
     .sort((a, b) => Math.max(b.lastPlayed || 0, b.lastLaunched || 0, b.importedLastPlayed || 0) - Math.max(a.lastPlayed || 0, a.lastLaunched || 0, a.importedLastPlayed || 0))
@@ -224,6 +228,12 @@ async function runScan() {
 async function doLaunch(id) {
   const g = store.get(id);
   if (!g) return { ok: false, error: 'Игра не найдена' };
+  if (g.installed === false) {
+    // Bought but not installed: the official client downloads it
+    if (!g.installUri) return { ok: false, error: 'Неизвестно, как установить эту игру' };
+    try { await shell.openExternal(g.installUri); } catch (e) { return { ok: false, error: `Не удалось открыть лаунчер: ${e.message}` }; }
+    return { ok: true, install: true };
+  }
   try {
     await launchGame(g);
   } catch (e) {
@@ -332,12 +342,41 @@ function registerIpc() {
 
   h('meta:fetch-missing', () => { meta.enqueueMissing(); return { ok: true }; });
   h('meta:refetch-all', () => {
-    for (const g of Object.values(store.games)) if (!g.missing) meta.enqueue(g.id);
+    for (const g of Object.values(store.games)) if (!g.missing && g.installed !== false) meta.enqueue(g.id);
     return { ok: true };
   });
   h('app:open-data', () => { shell.openPath(app.getPath('userData')); return { ok: true }; });
   h('app:open-url', (url) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { ok: true }; });
   h('app:quit', () => { quitting = true; app.quit(); });
+
+  // store accounts
+  h('acc:login', async (key) => { const r = await accounts.login(key); push(); return { ok: true, ...(r || {}) }; });
+  h('acc:local-steam', async () => { const r = await accounts.useLocalSteam(); push(); return r; });
+  h('acc:sync', async (key) => { const r = await accounts.sync(key); push(); return r; });
+  h('acc:logout', async (key) => { const r = await accounts.logout(key); push(); return r; });
+  h('acc:launcher', async (key) => {
+    const uri = accounts.launcherUri(key);
+    if (!uri) return { ok: false, error: 'Для этого сервиса нет ссылки на лаунчер' };
+    await shell.openExternal(uri);
+    return { ok: true };
+  });
+  h('acc:steam-key', (key) => { store.settings.steamApiKey = String(key || '').trim(); store.save(); push(); return { ok: true }; });
+
+  // built-in browser
+  h('br:open', (key, url) => { browser.open(key, url); return { ok: true }; });
+  h('br:bounds', (rect) => { browser.setBounds(rect); return { ok: true }; });
+  h('br:nav', (action) => { browser.nav(action); return { ok: true }; });
+  h('br:unload', () => { browser.unload('manual'); return { ok: true }; });
+  h('br:disable', () => { browser.disable(); return { ok: true }; });
+  h('br:external', () => { browser.openExternal(); return { ok: true }; });
+  h('br:set', (patch) => {
+    store.settings.browser = { ...store.settings.browser, ...patch };
+    store.save();
+    // economy / WebGL options apply to a newly created page
+    if (('economy' in patch) && browser.view) { const k = browser.key, u = browser.url; browser.destroyView(); browser.open(k, u); }
+    push();
+    return { ok: true };
+  });
 
   // zapret
   const zset = (patch) => { store.settings.zapret = { ...store.settings.zapret, ...patch }; store.save(); push(); return { ok: true }; };
@@ -402,18 +441,28 @@ async function init() {
   meta = new Meta(store, { fetch: (u, o) => net.fetch(u, o), getIcon, onUpdate: push, log });
   tracker = new Tracker(store, { onChange: push, onSession: push, log });
   zapret = new Zapret(store, { onChange: push, log });
+  accounts = new Accounts(store, { fetch: (u, o) => net.fetch(u, o), log, onChange: push, getWindow: () => win });
+  browser = new StoreBrowser(store, { getWindow: () => win, onChange: push, log });
   vpn = new Vpn(store, {
     onChange: push, log, fetch: (u, o) => net.fetch(u, o), dataDir: app.getPath('userData'),
-    getGameDirs: () => Object.values(store.games).filter((g) => !g.missing && g.installDir).map((g) => g.installDir),
+    getGameDirs: () => Object.values(store.games).filter((g) => !g.missing && g.installed !== false && g.installDir).map((g) => g.installDir),
   });
   registerIpc();
   createWindow();
+  browser.attachWindow(win);
   createTray();
   applyHotkey();
   applyAutostart();
   tracker.start();
   pollNet();
   if (store.settings.scanOnStart || !Object.keys(store.games).length) setTimeout(runScan, 600);
+  // owned libraries: refresh at most once in 12 hours, a bit after start
+  if (store.settings.syncAccountsOnStart) {
+    setTimeout(() => {
+      const stale = Object.values(store.settings.accounts || {}).some((a) => a.id && Date.now() - (a.updatedAt || 0) > 12 * 3600e3);
+      if (stale) accounts.syncAll().then(push);
+    }, 15000);
+  }
   else if (store.settings.autoFetchMeta) meta.enqueueMissing();
 }
 

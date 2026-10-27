@@ -20,7 +20,15 @@ const DEFAULT_SETTINGS = {
   scanOnStart: true,
   zapret: { dir: '', strategy: '', autostart: false, gameFilter: false, stopOnExit: false },
   vpn: { servers: [], subs: [], selected: 'auto', mode: 'proxy', directRu: true, gamesDirect: true, autostart: false, stopOnExit: true, port: 2080 },
+  accounts: {},
+  steamApiKey: '',
+  showUninstalled: false,
+  syncAccountsOnStart: true,
+  browser: { economy: true, blockTrackers: true, autoEnable: false, unloadOnMinimizeSec: 60, unloadOnLeaveSec: 30 },
 };
+
+// Fields that come from a store account (owned games that may not be installed)
+const OWNED_FIELDS = ['installUri', 'storeUrl', 'coverUrl', 'heroUrl'];
 
 // Fields the scanner owns (refreshed every scan); everything else belongs to the user
 const SCAN_FIELDS = ['source', 'name', 'installDir', 'exePath', 'launch', 'trackDir', 'steamAppId', 'importedPlaytime', 'importedLastPlayed', 'localArt'];
@@ -51,6 +59,8 @@ class Store {
           sources: { ...DEFAULT_SETTINGS.sources, ...(s.sources || {}) },
           zapret: { ...DEFAULT_SETTINGS.zapret, ...(s.zapret || {}) },
           vpn: { ...DEFAULT_SETTINGS.vpn, ...(s.vpn || {}) },
+          accounts: { ...(s.accounts || {}) },
+          browser: { ...DEFAULT_SETTINGS.browser, ...(s.browser || {}) },
         };
         return;
       } catch {}
@@ -107,11 +117,19 @@ class Store {
       if (ignored.has(f.id)) continue;
       seen.add(f.id);
       const old = this.games[f.id];
-      if (old) this.games[f.id] = { ...old, ...pickScan(f), missing: false };
-      else { this.games[f.id] = newGame(f); added++; }
+      if (old) {
+        // an owned game that just got installed keeps its account data, but gets a real launch method
+        this.games[f.id] = { ...old, ...pickScan(f), missing: false, installed: true };
+      } else { this.games[f.id] = newGame(f); added++; }
     }
     for (const g of Object.values(this.games)) {
       if (seen.has(g.id)) continue;
+      if (g.owned) {
+        // bought on an account but not on disk (any more) — show it as "not installed", not as missing
+        const st = this.scanStatus[g.source];
+        if (!(st && st.error)) { g.installed = false; g.missing = false; }
+        continue;
+      }
       if (g.source === 'manual') {
         g.missing = g.launch && g.launch.type === 'exe' ? !exists(g.launch.path) : false;
         continue;
@@ -123,6 +141,50 @@ class Store {
     }
     this.save();
     return added;
+  }
+
+  // Owned games from a store account. Returns how many new games appeared.
+  mergeOwned(source, list) {
+    const ignored = new Set(this.settings.ignoredIds);
+    const ids = new Set();
+    let added = 0;
+    for (const o of list) {
+      if (ignored.has(o.id)) continue;
+      ids.add(o.id);
+      const g = this.games[o.id];
+      const acc = {};
+      for (const k of OWNED_FIELDS) if (o[k]) acc[k] = o[k];
+      if (g) {
+        Object.assign(g, acc, { owned: true });
+        if (o.importedPlaytime > (g.importedPlaytime || 0)) g.importedPlaytime = o.importedPlaytime;
+        if (o.importedLastPlayed > (g.importedLastPlayed || 0)) g.importedLastPlayed = o.importedLastPlayed;
+        if (!g.steamAppId && o.steamAppId) g.steamAppId = o.steamAppId;
+        if (!g.developer && o.developer) g.developer = o.developer;
+      } else {
+        const ng = newGame({ id: o.id, source: source, name: o.name, steamAppId: o.steamAppId, importedPlaytime: o.importedPlaytime || 0, importedLastPlayed: o.importedLastPlayed || 0 });
+        Object.assign(ng, acc, { owned: true, installed: false, metaTried: true, developer: o.developer || '' });
+        this.games[o.id] = ng;
+        added++;
+      }
+    }
+    // no longer on the account (refund, family sharing ended): drop if it isn't installed either
+    for (const g of Object.values(this.games)) {
+      if (g.source === source && g.owned && !ids.has(g.id)) {
+        if (g.installed === false) delete this.games[g.id];
+        else g.owned = false;
+      }
+    }
+    this.save();
+    return added;
+  }
+
+  removeOwned(source) {
+    for (const g of Object.values(this.games)) {
+      if (g.source !== source || !g.owned) continue;
+      if (g.installed === false) delete this.games[g.id];
+      else { g.owned = false; for (const k of OWNED_FIELDS) delete g[k]; }
+    }
+    this.save();
   }
 
   // Directories of manual games — so the folder scanner doesn't add them twice

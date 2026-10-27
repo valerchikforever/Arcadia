@@ -34,7 +34,7 @@ class Meta {
 
   enqueueMissing() {
     for (const g of Object.values(this.store.games)) {
-      if (g.missing) continue;
+      if (g.missing || g.installed === false) continue; // not installed: covers come straight from the store CDN
       if (!g.metaTried || (!g.coverPath && !g.iconPath)) this.enqueue(g.id);
     }
   }

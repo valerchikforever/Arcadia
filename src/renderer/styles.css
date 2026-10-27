@@ -350,3 +350,49 @@ code { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; backg
 .core-row + .core-row { margin-top: 8px; }
 .muted-note { color: var(--text-3); }
 .srv-sub .proto + .proto { margin-left: -2px; }
+
+/* ---------- магазины и аккаунты ---------- */
+.view.full { overflow: hidden; display: flex; flex-direction: column; }
+.store-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.store-tabs { display: flex; gap: 6px; padding: 0 30px 12px; flex-wrap: wrap; }
+.store-tab { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg-2); color: var(--text-2); }
+.store-tab:hover { color: var(--text); background: var(--panel); }
+.store-tab.on { background: var(--panel-2); color: var(--text); border-color: var(--line-2); box-shadow: inset 0 -2px 0 var(--accent); }
+.store-tab .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.tab-ok svg { width: 13px; height: 13px; color: var(--ok); }
+.store-top { padding: 0 30px; }
+.acc-panel { display: flex; align-items: center; gap: 16px; padding: 14px 16px; border-radius: 14px; background: var(--bg-2); border: 1px solid var(--line); }
+.acc-panel.signed { border-color: rgba(74, 222, 128, .22); }
+.acc-ava { width: 46px; height: 46px; flex: none; border-radius: 12px; display: grid; place-items: center; font: 700 18px var(--font-d); color: #fff; background: linear-gradient(135deg, color-mix(in srgb, var(--c) 70%, #000), color-mix(in srgb, var(--c) 30%, #000)); }
+.acc-ava svg { width: 22px; height: 22px; }
+.acc-ava.img { object-fit: cover; background: var(--panel); }
+.acc-main { flex: 1; min-width: 0; }
+.acc-name { font: 600 16px var(--font-d); display: flex; align-items: center; gap: 6px; }
+.acc-ok svg { width: 15px; height: 15px; color: var(--ok); }
+.acc-sub { color: var(--text-3); font-size: 12.5px; margin-top: 2px; line-height: 1.45; }
+.acc-sub b { color: var(--text-2); }
+.acc-busy { display: flex; align-items: center; gap: 6px; color: var(--accent); font-size: 12.5px; margin-top: 4px; }
+.acc-busy svg { width: 14px; height: 14px; }
+.acc-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.store-links { margin: 12px 0 0; }
+.br-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 12px 30px 22px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--bg-2); }
+.br-bar { display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-bottom: 1px solid var(--line); background: var(--bg-2); }
+.icon-btn.sm { width: 30px; height: 30px; border-radius: 8px; }
+.icon-btn.sm svg { width: 16px; height: 16px; }
+.icon-btn[disabled] { opacity: .35; pointer-events: none; }
+.br-addr { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 12px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); font-size: 12.5px; overflow: hidden; white-space: nowrap; }
+.br-host { color: var(--text); font-weight: 600; }
+.br-title { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; }
+.br-bar .pill { display: inline-flex; align-items: center; gap: 5px; }
+.br-bar .pill svg { width: 13px; height: 13px; }
+.br-host-wrap { flex: 1; min-height: 0; position: relative; background: var(--bg); }
+.br-ph { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 10px; padding: 30px; color: var(--text-2); }
+.br-ph .big-ico { width: 64px; height: 64px; border-radius: 18px; display: grid; place-items: center; background: var(--panel); color: var(--accent); }
+.br-ph .big-ico svg { width: 30px; height: 30px; }
+.br-ph h2 { margin: 4px 0 0; color: var(--text); font: 600 20px var(--font-d); }
+.br-ph p { margin: 0; max-width: 520px; line-height: 1.55; }
+.br-ph .row { margin-top: 6px; }
+.play-btn.install { background: linear-gradient(135deg, #3b82f6, #6366f1); box-shadow: 0 8px 22px -8px rgba(99, 102, 241, .8); }
+.card.uninst .cover img.art { filter: saturate(.55) brightness(.75); }
+.card.uninst:hover .cover img.art { filter: none; }
+.card.uninst .title { color: var(--text-2); }

@@ -40,6 +40,14 @@ contextBridge.exposeInMainWorld('api', {
     removeSub: call('vpn:remove-sub'), renameServer: call('vpn:rename-server'), ping: call('vpn:ping'),
     installCore: call('vpn:install-core'), installXray: call('vpn:install-xray'), pickXray: call('vpn:pick-xray'), pickCore: call('vpn:pick-core'), start: call('vpn:start'), stop: call('vpn:stop'), openLog: call('vpn:open-log'),
   },
+  acc: {
+    login: call('acc:login'), localSteam: call('acc:local-steam'), sync: call('acc:sync'), logout: call('acc:logout'),
+    launcher: call('acc:launcher'), steamKey: call('acc:steam-key'),
+  },
+  br: {
+    open: call('br:open'), bounds: call('br:bounds'), nav: call('br:nav'), unload: call('br:unload'),
+    disable: call('br:disable'), external: call('br:external'), set: call('br:set'),
+  },
   fileUrl: (p, v) => {
     if (!p) return '';
     try { return pathToFileURL(p).href + (v ? `?v=${v}` : ''); } catch { return ''; }

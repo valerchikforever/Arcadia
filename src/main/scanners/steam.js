@@ -84,9 +84,13 @@ function findLocalArt(steamPath, appid) {
   return art;
 }
 
+let lastSteamPath = null;
+const getSteamPath = () => lastSteamPath || findSteamPath({ reg: {} });
+
 async function scan(ctx) {
   const steamPath = findSteamPath(ctx);
   if (!steamPath) return [];
+  lastSteamPath = steamPath;
   const playtime = readPlaytime(steamPath);
   const games = [];
   const seen = new Set();
@@ -123,4 +127,4 @@ async function scan(ctx) {
   return games;
 }
 
-module.exports = { scan, findSteamPath, libraryFolders, readPlaytime };
+module.exports = { scan, getSteamPath, findSteamPath, libraryFolders, readPlaytime };

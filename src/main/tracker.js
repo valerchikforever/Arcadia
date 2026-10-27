@@ -58,7 +58,7 @@ class Tracker {
         const procs = (await listProcessPaths()).map(normPath);
         let changed = false;
         for (const g of Object.values(this.store.games)) {
-          if (g.missing) continue;
+          if (g.missing || g.installed === false) continue;
           const watched = watchAll || this.pendingLaunch.has(g.id) || this.active.has(g.id);
           if (!watched) continue;
           const dir = trackDirOf(g);
