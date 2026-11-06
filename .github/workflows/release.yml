@@ -22,7 +22,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          # manual run: build the current main; the release step creates the tag on that commit
+          ref: ${{ github.event_name == 'push' && github.ref || 'main' }}
 
       - uses: actions/setup-node@v4
         with:
@@ -63,4 +64,5 @@ jobs:
           tag_name: ${{ env.TAG }}
           name: Arcadia ${{ env.TAG }}
           body_path: ${{ env.NOTES }}
+          target_commitish: ${{ github.sha }}
           files: out/*
