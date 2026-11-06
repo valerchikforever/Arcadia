@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https: http://asset.localhost asset:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost">
+  <title>Arcadia</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar">
+      <div class="brand drag">
+        <div class="logo"><svg viewBox="0 0 32 32"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff5d8f"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs><path d="M16 3 29 28H22.5L16 15 9.5 28H3Z" fill="url(#lg)"/><path d="M12 23h8l-1.6-3h-4.8Z" fill="url(#lg)"/></svg></div>
+        <span>Arcadia</span>
+      </div>
+      <nav id="nav"></nav>
+      <div class="sidebar-foot">
+        <div id="totalTime" class="total-time"></div>
+        <button class="icon-btn" id="btnSettings" title="Настройки"></button>
+      </div>
+    </aside>
+    <main>
+      <header class="topbar drag">
+        <div class="search nodrag">
+          <span class="search-ico"></span>
+          <input id="search" placeholder="Поиск по библиотеке" autocomplete="off" spellcheck="false">
+          <kbd>Ctrl F</kbd>
+        </div>
+        <div class="top-actions nodrag">
+          <select id="sort" title="Сортировка">
+            <option value="name">По названию</option>
+            <option value="recent">Недавно запущенные</option>
+            <option value="playtime">По времени в игре</option>
+            <option value="added">Недавно добавленные</option>
+          </select>
+          <input type="range" id="size" min="140" max="280" step="10" title="Размер обложек">
+          <span id="metaStatus" class="pill muted hidden"></span>
+          <button class="net-pill" id="pillNet" title="Обход блокировок: zapret и VPN"></button>
+          <button class="btn ghost" id="btnScan"></button>
+          <button class="btn primary" id="btnAdd"></button>
+        </div>
+        <div class="winctl nodrag">
+          <button id="wMin" title="Свернуть"><svg viewBox="0 0 10 10"><path d="M1 5h8" stroke="currentColor" stroke-width="1.1"/></svg></button>
+          <button id="wMax" title="Развернуть"><svg viewBox="0 0 10 10"><rect x="1.5" y="1.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></button>
+          <button id="wClose" class="close" title="Закрыть"><svg viewBox="0 0 10 10"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" stroke-width="1.1"/></svg></button>
+        </div>
+      </header>
+      <section id="view" class="view"></section>
+    </main>
+  </div>
+  <div id="ctx" class="ctx hidden"></div>
+  <div id="modalRoot"></div>
+  <div id="toasts"></div>
+  <div id="drop" class="drop hidden"><div>Отпустите, чтобы добавить игры<br><small>.exe, .lnk, .url или папку с игрой</small></div></div>
+  <script src="tauri-api.js"></script>
+  <script src="icons.js"></script>
+  <script src="app.js"></script>
+  <script src="net.js"></script>
+  <script src="store.js"></script>
+</body>
+</html>
