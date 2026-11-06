@@ -1,0 +1,66 @@
+name: Release
+
+# Push a tag like v2.0.0 → Windows build → GitHub Release with the installer and the portable zip.
+# Release text: .github/release-notes/<tag>.md (optional).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v2.0.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Tauri CLI
+        run: npm ci
+
+      - name: Tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      - name: Build installer
+        run: npx tauri build --bundles nsis
+
+      - name: Collect files
+        shell: pwsh
+        run: |
+          $v = "$env:TAG".TrimStart('v')
+          New-Item -ItemType Directory -Force out, portable | Out-Null
+          Copy-Item (Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1) "out/Arcadia-Setup-$v.exe"
+          Copy-Item src-tauri/target/release/Arcadia.exe portable/
+          if (Test-Path src-tauri/target/release/WebView2Loader.dll) { Copy-Item src-tauri/target/release/WebView2Loader.dll portable/ }
+          "Arcadia portable`r`nЗапустите Arcadia.exe. Данные хранятся в %APPDATA%\Arcadia" | Set-Content -Encoding utf8 portable/README.txt
+          Compress-Archive -Path portable/* -DestinationPath "out/Arcadia-Portable-$v.zip"
+          $notes = ".github/release-notes/$env:TAG.md"
+          if (-not (Test-Path $notes)) { "Arcadia $v" | Set-Content $notes }
+          "NOTES=$notes" >> $env:GITHUB_ENV
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: Arcadia ${{ env.TAG }}
+          body_path: ${{ env.NOTES }}
+          files: out/*
