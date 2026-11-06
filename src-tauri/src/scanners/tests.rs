@@ -19,6 +19,10 @@ fn hm(pairs: &[(&str, &str)]) -> HashMap<String, String> {
 fn ps(p: &Path) -> String {
     p.to_string_lossy().to_string()
 }
+/// Steam writes paths into .vdf with escaped backslashes ("C:\\Games")
+fn vdf_esc(p: &Path) -> String {
+    ps(p).replace('\\', "\\\\")
+}
 
 #[test]
 fn exe_finder_picks_real_game() {
@@ -42,7 +46,7 @@ fn full_scan() {
     let pd = tmp.join("ProgramData");
     let steam = tmp.join("Steam");
     let lib2 = tmp.join("SteamLibrary");
-    mk(&steam.join("steamapps").join("libraryfolders.vdf"), format!("\"libraryfolders\"{{\"0\"{{\"path\" \"{}\"}} \"1\"{{\"path\" \"{}\"}}}}", ps(&steam), ps(&lib2)).as_bytes());
+    mk(&steam.join("steamapps").join("libraryfolders.vdf"), format!("\"libraryfolders\"{{\"0\"{{\"path\" \"{}\"}} \"1\"{{\"path\" \"{}\"}}}}", vdf_esc(&steam), vdf_esc(&lib2)).as_bytes());
     mk(&steam.join("steamapps").join("appmanifest_570.acf"), br#""AppState"{"appid" "570" "name" "Dota 2" "installdir" "dota 2 beta" "StateFlags" "4"}"#);
     mk(&steam.join("steamapps").join("appmanifest_228980.acf"), br#""AppState"{"appid" "228980" "name" "Steamworks Common Redistributables" "installdir" "x" "StateFlags" "4"}"#);
     mk(&lib2.join("steamapps").join("appmanifest_1091500.acf"), br#""AppState"{"appid" "1091500" "name" "Cyberpunk 2077" "installdir" "Cyberpunk 2077" "StateFlags" "4"}"#);
