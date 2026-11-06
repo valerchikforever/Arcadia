@@ -81,6 +81,7 @@ pub fn snapshot() -> Value {
         "metaPending": crate::meta::pending(), "lastError": a.last_error.lock().unwrap().clone(),
         "net": { "zapret": zap, "vpn": vpn }, "accounts": crate::accounts::state(), "browser": crate::browser::state(),
         "installs": Value::Object(a.installs.lock().unwrap().active.clone()),
+        "extras": crate::extras::state(),
         "platform": if cfg!(windows) { "win32" } else { "linux" }, "version": VERSION,
     })
 }

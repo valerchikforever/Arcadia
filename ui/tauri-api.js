@@ -37,7 +37,7 @@
     onDragDrop: on('dragdrop'),
     onLayout: on('layout'),
     onEvent: (name, cb) => T.event.listen(name, (e) => cb(e.payload)),
-    win: { minimize: call('win:minimize'), maximize: call('win:maximize'), close: call('win:close'), drag: call('win:drag') },
+    win: { minimize: call('win:minimize'), maximize: call('win:maximize'), close: call('win:close'), drag: call('win:drag'), fullscreen: call('win:fullscreen') },
     zapret: {
       set: call('zapret:set'), detect: call('zapret:detect'), pickDir: call('zapret:pick-dir'),
       start: call('zapret:start'), stop: call('zapret:stop'), open: call('zapret:open'),

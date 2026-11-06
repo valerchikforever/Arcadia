@@ -29,7 +29,14 @@ pub fn default_settings() -> Value {
         "hideUninstalled": false,
         "installFilter": "all",
         "syncAccountsOnStart": true,
-        "browser": { "economy": true, "blockTrackers": true, "autoEnable": false, "unloadOnMinimizeSec": 60, "unloadOnLeaveSec": 30 }
+        "browser": { "economy": true, "blockTrackers": true, "autoEnable": false, "unloadOnMinimizeSec": 60, "unloadOnLeaveSec": 30 },
+        "notify": { "downloads": true, "freeGames": true, "wishlist": true, "vpn": true, "torrents": true, "zapret": true, "test": true },
+        "discord": { "enabled": false, "clientId": "", "steamToo": false },
+        "torrent": { "enabled": false, "url": "http://127.0.0.1:8080", "user": "admin", "pass": "" },
+        "notified": {},
+        "view": "grid",
+        "gamepadStart": true,
+        "filters": {}
     })
 }
 
@@ -371,7 +378,7 @@ impl Store {
             for (k, v) in p {
                 let cur = self.settings.get(&k).cloned().unwrap_or(Value::Null);
                 let nv = match (&cur, &v) {
-                    (Value::Object(_), Value::Object(_)) if k != "accounts" => merge_defaults(&cur, &v),
+                    (Value::Object(_), Value::Object(_)) if k != "accounts" && k != "filters" => merge_defaults(&cur, &v),
                     _ => v,
                 };
                 self.settings[k.as_str()] = nv;

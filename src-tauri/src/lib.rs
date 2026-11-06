@@ -3,6 +3,7 @@ pub mod actions;
 pub mod app;
 pub mod browser;
 pub mod commands;
+pub mod discord;
 pub mod extras;
 pub mod installs;
 pub mod launch;
@@ -20,6 +21,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| app::show_window()))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -38,6 +40,7 @@ pub fn run() {
             app::build_tray(a.handle())?;
             commands::setup_system();
             app::start_loops();
+            tauri::async_runtime::spawn(extras::torrent_loop());
             let (scan, sync) = {
                 let st = app::app().store.lock().unwrap();
                 (st.settings["scanOnStart"] != false || st.games.is_empty(), st.settings["syncAccountsOnStart"] != false)

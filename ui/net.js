@@ -121,7 +121,7 @@ function netModal(tab) {
   const body = `
     <div class="tabs"><button data-ntab="zapret">${I.zap}Zapret</button><button data-ntab="vpn">${I.globe}VPN</button></div>
     <div class="body net-body">
-      <div data-npane="zapret"><div data-region="z"></div></div>
+      <div data-npane="zapret"><div data-region="z"></div><div data-region="za"></div></div>
       <div data-npane="vpn" class="hidden">
         <div data-region="vt"></div>
         <div class="field" style="margin-top:18px"><label>Добавить сервер</label>
@@ -151,7 +151,8 @@ function netModal(tab) {
     setRegion('z', zapretHtml({ ...S.net.zapret, detected: local.detected }));
     setRegion('vt', vpnTopHtml(S.net.vpn));
     setRegion('vl', vpnListHtml(S.net.vpn));
-    setRegion('vo', vpnOptsHtml(S.net.vpn));
+    setRegion('vo', vpnOptsHtml(S.net.vpn) + vpnExtrasHtml(S.net.vpn));
+    setRegion('za', S.net.zapret.valid ? `<div class="subhead">Автоподбор</div>${autopickHtml()}` : '');
   };
   ui.netRefresh = refresh;
   refresh();
@@ -188,6 +189,15 @@ function netModal(tab) {
     }
     if (a === 'z-use') { local.detected = null; return api.zapret.set({ dir: b.dataset.dir, strategy: '' }); }
     if (a === 'z-open') return api.zapret.open(b.dataset.sub || '');
+    if (a === 'z-autopick') return run(b, () => api.zapret.autopick());
+    if (a === 'z-autopick-stop') return run(b, () => api.zapret.autopickStop(), 'Останавливаем после текущей стратегии…');
+    if (a === 'v-app-add') { const n = await api.vpn.pickApp(); if (n) api.vpn.set({ apps: [...new Set([...(v.apps || []), n])] }); return; }
+    if (a === 'v-app-type') {
+      const n = await promptModal('Имя программы', '', 'например: chrome.exe');
+      if (n) api.vpn.set({ apps: [...new Set([...(v.apps || []), /\.exe$/i.test(n) ? n : n + '.exe'])] });
+      return;
+    }
+    if (a === 'v-app-del') return api.vpn.set({ apps: (v.apps || []).filter((x) => x !== b.dataset.app) });
     // vpn
     if (a === 'v-toggle') return run(null, () => (v.running ? api.vpn.stop() : api.vpn.start()), v.running ? 'VPN отключён' : 'VPN подключён');
     if (a === 'v-mode') return api.vpn.set({ mode: b.dataset.mode });
@@ -228,6 +238,8 @@ function netModal(tab) {
   el.addEventListener('change', (e) => {
     const t = e.target;
     if (t.dataset.naChange === 'z-strategy') return api.zapret.set({ strategy: t.value });
+    if (t.dataset.naChange === 'v-subs') return api.vpn.set({ subsAutoHours: Number(t.value) });
+    if (t.dataset.naChange === 'v-appsmode') return api.vpn.set({ appsMode: t.value });
     const k = t.dataset.nkey;
     if (!k) return;
     const [grp, key] = k.split('.');

@@ -104,6 +104,7 @@ function renderStore() {
     <div class="view-head" style="padding-bottom:10px"><h1>Магазины и аккаунты</h1><span class="sub">вход в аккаунты необязателен</span></div>
     <div class="store-tabs">${tabs}</div>
     <div class="store-top">${accountPanel(key, a)}<div class="chips store-links">${links}</div></div>
+    ${key === 'epic' && S.extras && (S.extras.freeGames || []).length ? `<div class="free-strip"><span class="fs-t">${I.sparkle}Бесплатно сейчас</span>${S.extras.freeGames.map((f) => `<button class="free-g" data-sa="link" data-url="${esc(f.url)}" title="до ${esc(new Date(f.until).toLocaleDateString('ru-RU'))}">${f.image ? `<img src="${esc(f.image)}" draggable="false">` : ''}<span>${esc(f.title)}</span><i>до ${esc(new Date(f.until).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }))}</i></button>`).join('')}</div>` : ''}
     ${browserFrame(key, a)}
   </div>`;
 }

@@ -34,7 +34,23 @@ pub async fn call(ch: String, args: Vec<Value>) -> Value {
 }
 
 pub async fn do_launch(id: &str) -> Value {
-    let Some(g) = app().store.lock().unwrap().games.get(id).cloned() else { return err("Игра не найдена") };
+    do_launch_profile(id, None).await
+}
+
+/// profile: index into the game's launch profiles (None = the usual way)
+/// profile: None = the game's default, Some(-1) = plain launch, Some(i) = profile i
+pub async fn do_launch_profile(id: &str, profile: Option<i64>) -> Value {
+    let Some(mut g) = app().store.lock().unwrap().games.get(id).cloned() else { return err("Игра не найдена") };
+    let idx = profile.or_else(|| g["defaultProfile"].as_i64()).filter(|i| *i >= 0).map(|i| i as usize);
+    if let Some(p) = idx.and_then(|i| g["profiles"].get(i)).cloned() {
+        let mut o = p.clone();
+        if s(&o, "type").is_empty() {
+            let path = s(&o, "path");
+            o["type"] = json!(if path.contains("://") { "uri" } else { "exe" });
+            if path.contains("://") { o["uri"] = json!(path); }
+        }
+        g["launchOverride"] = o;
+    }
     if g["installed"] == false {
         let uri = s(&g, "installUri");
         if uri.is_empty() {
@@ -225,10 +241,10 @@ async fn dispatch(ch: &str, a: &[Value]) -> Value {
     match ch {
         "state:get" => blocking(crate::app::snapshot).await,
         "scan" => { run_scan(); ok() }
-        "launch" => do_launch(&sarg(a, 0)).await,
+        "launch" => do_launch_profile(&sarg(a, 0), arg(a, 1).as_i64()).await,
         "game:update" => {
             let mut clean = serde_json::Map::new();
-            for k in ["customName", "favorite", "hidden", "collections", "launchOverride", "notes", "status", "profiles", "actions", "tags", "hltb"] {
+            for k in ["customName", "favorite", "hidden", "collections", "launchOverride", "notes", "status", "profiles", "defaultProfile", "actions", "tags", "hltb"] {
                 if let Some(v) = arg(a, 1).get(k) {
                     clean.insert(k.into(), v.clone());
                 }
@@ -310,6 +326,10 @@ async fn dispatch(ch: &str, a: &[Value]) -> Value {
         }
         "win:drag" => { if let Some(w) = crate::app::main_window() { let _ = w.start_dragging(); } ok() }
         "win:show" => { show_window(); ok() }
+        "win:fullscreen" => {
+            if let Some(w) = crate::app::main_window() { let on = arg(a, 0) == true; let _ = w.set_fullscreen(on); }
+            ok()
+        }
 
         // zapret
         "zapret:set" => { app.store.lock().unwrap().set_settings(json!({ "zapret": arg(a, 0) })); app.push(); ok() }

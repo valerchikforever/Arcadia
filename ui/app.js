@@ -83,7 +83,7 @@ function plural(n, one, few, many) {
 }
 
 // ---------------- data views ----------------
-function viewGames(view = ui.view) {
+function viewGames(view = ui.view, noFilter = false) {
   let list = games();
   if (view === 'hidden') list = list.filter((g) => g.hidden);
   else {
@@ -103,8 +103,9 @@ function viewGames(view = ui.view) {
   }
   if (ui.search) {
     const q = norm(ui.search);
-    list = list.filter((g) => norm(nameOf(g)).includes(q) || norm(g.developer).includes(q));
+    list = list.filter((g) => norm(nameOf(g)).includes(q) || norm(g.developer).includes(q) || (g.tags || []).some((t) => norm(t).includes(q)));
   }
+  if (!noFilter && typeof applyFilters === 'function' && !['downloads', 'monitor', 'hidden'].includes(view)) list = applyFilters(list);
   const sort = view === 'recent' ? 'recent' : S.settings.sort || 'name';
   const byName0 = (a, b) => nameOf(a).localeCompare(nameOf(b), 'ru', { sensitivity: 'base', numeric: true });
   const byName = (a, b) => (inst(b) - inst(a)) || byName0(a, b); // installed first
@@ -127,6 +128,7 @@ function viewTitle(view) {
   if (view === 'downloads') return 'Загрузки';
   if (view === 'store') return 'Магазины';
   if (view === 'stats') return 'Статистика';
+  if (view === 'monitor') return 'Мониторинг';
   if (view.startsWith('src:')) return (SOURCES[view.slice(4)] || {}).label || view.slice(4);
   if (view.startsWith('col:')) { const c = S.collections.find((x) => x.id === view.slice(4)); return c ? c.name : 'Коллекция'; }
   return '';
@@ -148,9 +150,11 @@ function renderNav() {
   html += navItem('recent', I.recent, 'Недавние', cnt((g) => lastOf(g) && inst(g)));
   const unin = all.filter((g) => !inst(g) && !g.hidden).length;
   const dl = Object.keys(S.installs || {}).filter((id) => S.games[id]).length;
-  if (dl) html += navItem('downloads', I.download, 'Загрузки', `<span class="dl-dot"></span>${dl}`);
+  const tdl = ((S.extras && S.extras.torrents) || []).filter((t) => t.progress < 1).length;
+  if (dl + tdl || (S.settings.torrent && S.settings.torrent.enabled)) html += navItem('downloads', I.download, 'Загрузки', dl + tdl ? `<span class="dl-dot"></span>${dl + tdl}` : undefined);
   if (unin && !S.settings.hideUninstalled) html += navItem('uninstalled', I.store, 'Не установлены', unin);
   html += navItem('stats', I.chart, 'Статистика');
+  html += navItem('monitor', I.cpu, 'Мониторинг', S.extras && S.extras.monitor && S.extras.monitor.running ? '<span class="dl-dot on"></span>' : undefined);
   const hid = all.filter((g) => g.hidden).length;
   if (hid) html += navItem('hidden', I.eyeOff, 'Скрытые', hid);
   const miss = all.filter((g) => g.missing && !g.hidden).length;
@@ -202,6 +206,7 @@ function cardHtml(g) {
       ${coverHtml(g)}
       <div class="shade"></div>
       <span class="badge" style="--c:${src.color}">${esc(src.short || src.label)}</span>
+      ${g.status && typeof STATUS !== 'undefined' && STATUS[g.status] ? `<span class="st-dot" style="--c:${STATUS[g.status].color}" title="${STATUS[g.status].label}"></span>` : ''}
       <button class="fav-btn${g.favorite ? ' on' : ''}" data-act="fav" title="Избранное">${g.favorite ? I.heartFill : I.heart}</button>
       ${run ? '<span class="live">Запущено</span>' : p && !inst(g) ? '' : inst(g) ? `<button class="play-btn" data-act="play">${I.play}Играть</button>` : `<button class="play-btn install" data-act="play">${I.download}Установить</button>`}
       ${p ? `<div class="dl-over${p.paused ? ' paused' : ''}"><div class="dl-pct">${Math.floor(p.pct)}%</div><div class="dl-bar"><i style="width:${p.pct}%"></i></div></div>` : ''}
@@ -211,7 +216,7 @@ function cardHtml(g) {
 }
 
 function continueHtml() {
-  if (ui.view !== 'all' || ui.search) return '';
+  if (ui.view !== 'all' || ui.search || filtersActive()) return '';
   const recent = games().filter((g) => !g.hidden && !g.missing && inst(g) && lastOf(g) > Date.now() - 45 * 864e5)
     .sort((a, b) => lastOf(b) - lastOf(a)).slice(0, 4);
   if (recent.length < 2) return '';
@@ -236,6 +241,7 @@ function emptyHtml() {
 }
 
 function renderLibrary() {
+  if (ui.view === 'downloads') return renderDownloads();
   const list = viewGames();
   const isCol = ui.view.startsWith('col:');
   const ins = list.filter(inst), un = list.filter((g) => !inst(g));
@@ -249,16 +255,17 @@ function renderLibrary() {
     </div>` : '';
   const shown = f === 'installed' ? ins : f === 'uninstalled' ? un : list;
   const head = `<div class="view-head"><h1>${esc(viewTitle(ui.view))}</h1><span class="sub">${shown.length} ${plural(shown.length, 'игра', 'игры', 'игр')}</span><span class="grow"></span>
-    ${seg}
+    ${seg}${headTools()}
     ${isCol ? `<button class="btn ghost" data-act="rename-col">${I.edit}Переименовать</button><button class="btn ghost danger" data-act="delete-col">${I.trash}Удалить коллекцию</button>` : ''}
     ${ui.view === 'hidden' && list.length ? '<span class="sub">Правый клик → «Показать», чтобы вернуть игру</span>' : ''}</div>`;
-  if (!list.length) return head + emptyHtml();
+  const fb = filterBarHtml(viewGames(ui.view, true));
+  if (!list.length) return head + fb + (filtersActive() && viewGames(ui.view, true).length ? `<div class="empty"><div class="big-ico">${I.filter}</div><h2>Нет игр с такими фильтрами</h2><div class="row"><button class="btn" data-act="f-reset">Сбросить фильтры</button></div></div>` : emptyHtml());
   if (canSplit && f === 'all') {
-    return head + continueHtml()
-      + `<div class="section-label sect">${I.check}Установлены · ${ins.length}</div><div class="grid">${ins.map(cardHtml).join('')}</div>`
-      + `<div class="section-label sect">${I.store}Не установлены · ${un.length}<button class="link-btn" data-act="ifilter" data-f="installed">скрыть</button></div><div class="grid">${un.map(cardHtml).join('')}</div>`;
+    return head + fb + continueHtml()
+      + `<div class="section-label sect">${I.check}Установлены · ${ins.length}</div>${itemsHtml(ins)}`
+      + `<div class="section-label sect">${I.store}Не установлены · ${un.length}<button class="link-btn" data-act="ifilter" data-f="installed">скрыть</button></div>${itemsHtml(un)}`;
   }
-  return head + (f === 'uninstalled' ? '' : continueHtml()) + `<div class="grid">${shown.map(cardHtml).join('')}</div>`;
+  return head + fb + (f === 'uninstalled' ? '' : continueHtml()) + itemsHtml(shown);
 }
 
 // ---------------- detail ----------------
@@ -284,12 +291,14 @@ function renderDetail() {
         <h1>${esc(nameOf(g))}</h1>
         ${g.missing ? `<div class="warn-box">${I.alert}<span>Игра не найдена при последнем сканировании — возможно, её удалили или перенесли. Укажите новый путь в «Изменить» или удалите из библиотеки.</span></div>` : ''}
         <div class="actions">
-          ${run ? `<span class="running-note"><span class="live" style="position:static">Запущено</span></span>` : inst(g) ? `<button class="btn primary big" data-act="play">${I.play}Играть</button>` : dlOf(g) ? `<button class="btn big" data-act="steam-downloads">${I.download}Открыть загрузки ${esc(src.label)}</button>` : `<button class="btn primary big" data-act="play">${I.download}Установить через ${esc(src.label)}</button>${g.storeUrl ? `<button class="btn big ghost" data-act="store-page">${I.globe}Страница в магазине</button>` : ''}`}
+          ${run ? `<span class="running-note"><span class="live" style="position:static">Запущено</span></span>` : inst(g) ? `<div class="split"><button class="btn primary big" data-act="play">${I.play}${(g.profiles || []).length && (g.defaultProfile ?? -1) >= 0 ? esc(g.profiles[g.defaultProfile]?.name || 'Играть') : 'Играть'}</button><button class="btn primary big caret" data-act="play-menu" title="Способ запуска">${I.chevDown}</button></div>` : dlOf(g) ? `<button class="btn big" data-act="steam-downloads">${I.download}Открыть загрузки ${esc(src.label)}</button>` : `<button class="btn primary big" data-act="play">${I.download}Установить через ${esc(src.label)}</button>${g.storeUrl ? `<button class="btn big ghost" data-act="store-page">${I.globe}Страница в магазине</button>` : ''}`}
           <button class="icon-btn${g.favorite ? ' on' : ''}" data-act="fav" title="Избранное">${g.favorite ? I.heartFill : I.heart}</button>
           <button class="icon-btn" data-act="edit" title="Изменить">${I.edit}</button>
           <button class="icon-btn" data-act="folder" title="Открыть папку">${I.folder}</button>
           <button class="icon-btn" data-act="more" title="Ещё">${I.more}</button>
+          <select class="input st-select" data-act-change="status" title="Статус игры">${[['', 'Без статуса'], ...Object.entries(STATUS).map(([k, v]) => [k, v.label])].map(([k, l]) => `<option value="${k}" ${(g.status || '') === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
         </div>
+        ${(() => { const a = g.actions || {}; const bits = [a.zapret === 'on' && 'включит zapret', a.zapret === 'off' && 'выключит zapret', a.vpn === 'on' && 'включит VPN', a.vpn === 'off' && 'выключит VPN', a.power && 'высокая производительность', a.before && a.before.path && 'запустит ' + a.before.path.split(/[\\/]/).pop()].filter(Boolean); return bits.length ? `<div class="act-note">${I.zap}Перед запуском: ${esc(bits.join(', '))} <a class="link" data-act="edit-actions">изменить</a></div>` : ''; })()}
         ${(() => {
           const p = dlOf(g);
           if (!p) return '';
@@ -307,7 +316,8 @@ function renderDetail() {
         </div>
         ${steamNote}
         ${g.description ? `<p class="desc">${esc(g.description)}</p>` : ''}
-        ${(g.genres || []).length ? `<div class="chips">${g.genres.map((x) => `<span class="chip">${esc(x)}</span>`).join('')}</div>` : ''}
+        ${(g.genres || []).length || (g.tags || []).length ? `<div class="chips">${(g.genres || []).map((x) => `<button class="chip" data-act="tag-filter" data-v="${esc(x)}">${esc(x)}</button>`).join('')}${(g.tags || []).map((x) => `<button class="chip tag" data-act="tag-filter" data-v="${esc(x)}">#${esc(x)}</button>`).join('')}<button class="chip" data-act="edit-tags">+ тег</button></div>` : `<div class="chips"><button class="chip" data-act="edit-tags">+ тег</button></div>`}
+        ${hltbHtml(g)}
         <div class="subhead">Коллекции</div>
         <div class="chips">${S.collections.map((c) => `<button class="chip${(g.collections || []).includes(c.id) ? ' on' : ''}" data-act="toggle-col" data-col="${esc(c.id)}">${esc(c.name)}</button>`).join('')}<button class="chip" data-act="new-col-for">+ Новая коллекция</button></div>
         ${sessions.length ? `<div class="subhead">Последние сессии</div><div class="sessions">${sessions.map((s) => `<div class="session"><span>${new Date(s.start).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}</span><b>${esc(fmtTime((s.end - s.start) / 1000))}</b></div>`).join('')}</div>` : ''}
@@ -358,19 +368,65 @@ function renderStats() {
     </div>`;
 }
 
+// ---------------- fast DOM updates ----------------
+// Replaces only what changed: grids/lists are patched card by card (keyed by data-id), so a progress tick
+// or a favourite click doesn't rebuild 200+ covers.
+function morph(root, html) {
+  const t = document.createElement('template');
+  t.innerHTML = html;
+  const nw = [...t.content.children];
+  const old = [...root.children];
+  const keyed = (el) => el.classList && (el.classList.contains('grid') || el.classList.contains('glist'));
+  const same = nw.length === old.length && nw.every((n, i) => n.tagName === old[i].tagName && (keyed(n) ? keyed(old[i]) : true));
+  if (!same) { root.replaceChildren(...t.content.childNodes); return; }
+  nw.forEach((n, i) => {
+    const o = old[i];
+    if (keyed(n)) {
+      if (o.className !== n.className) o.className = n.className;
+      patchKeyed(o, n);
+    } else if (o.outerHTML !== n.outerHTML) o.replaceWith(n);
+  });
+}
+
+function patchKeyed(o, n) {
+  const map = new Map();
+  for (const c of [...o.children]) map.set(c.dataset.id, c);
+  const kids = [...n.children];
+  kids.forEach((k, idx) => {
+    let el = map.get(k.dataset.id);
+    const h = k.outerHTML;
+    if (el) {
+      map.delete(k.dataset.id);
+      if ((el._h || el.outerHTML) !== h) { k._h = h; el.replaceWith(k); el = k; }
+    } else { el = k; el._h = h; }
+    if (o.children[idx] !== el) o.insertBefore(el, o.children[idx] || null);
+  });
+  map.forEach((c) => c.remove());
+}
+
+// coalesce bursts of state updates into one frame
+let renderQueued = false;
+function scheduleRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => { renderQueued = false; render(); });
+}
+
 // ---------------- render loop ----------------
 function render() {
   document.documentElement.style.setProperty('--card', (S.settings.cardSize || 190) + 'px');
+  document.body.classList.toggle('list-view', S.settings.view === 'list');
   renderNav();
   const view = $('#view');
   let html;
   if (ui.detail) html = renderDetail();
   else if (ui.view === 'stats') html = renderStats();
   else if (ui.view === 'store') html = renderStore();
+  else if (ui.view === 'monitor') html = renderMonitor();
   else html = renderLibrary();
   if (html !== ui.lastHtml) {
     const top = view.scrollTop;
-    view.innerHTML = html;
+    morph(view, html);
     view.scrollTop = top;
     ui.lastHtml = html;
   }
@@ -401,11 +457,16 @@ function go(view) {
   render();
   $('#view').scrollTop = ui.scroll[view] || 0;
   if (view === 'store' && typeof storeEntered === 'function') storeEntered();
+  monPoll(view === 'monitor');
 }
 
 function openDetail(id) {
   ui.scroll[ui.view] = $('#view').scrollTop;
   ui.detail = id;
+  // HowLongToBeat: look it up once per game, quietly
+  const g0 = S.games[id];
+  ui.hltbTried = ui.hltbTried || {};
+  if (g0 && !g0.hltb && !ui.hltbTried[id]) { ui.hltbTried[id] = 1; setTimeout(() => ui.detail === id && hltbFetch(id, true), 300); }
   ui.lastHtml = '';
   render();
   $('#view').scrollTop = 0;
@@ -419,11 +480,11 @@ function closeDetail() {
 }
 
 // ---------------- actions ----------------
-async function play(id) {
+async function play(id, profile) {
   const g = S.games[id];
   if (!g) return;
-  if (inst(g)) toast(`Запускаем «${nameOf(g)}»…`, 'ok');
-  const r = await api.launch(id);
+  if (inst(g)) toast(`Запускаем «${nameOf(g)}»${profile >= 0 && g.profiles && g.profiles[profile] ? ` (${g.profiles[profile].name || 'профиль'})` : ''}…`, 'ok');
+  const r = profile === undefined ? await api.launch(id) : await api.launch(id, profile);
   if (!r || !r.ok) toast((r && r.error) || 'Не удалось запустить игру', 'err');
   else if (r.install) toast(`Установка открыта в ${srcOf(g).label} — после загрузки игра появится в библиотеке`, 'ok');
 }
@@ -483,7 +544,9 @@ function showCtx(id, x, y) {
   m.innerHTML = `
     <button data-c="play">${I.play}Играть</button>
     <button data-c="open">${I.grid}Открыть страницу игры</button>
+    ${(g.profiles || []).map((p, i) => `<button data-c="prof" data-i="${i}">${I.play}${esc(p.name || 'Профиль ' + (i + 1))}</button>`).join('')}
     <button data-c="fav">${g.favorite ? I.heartFill : I.heart}${g.favorite ? 'Убрать из избранного' : 'В избранное'}</button>
+    <hr><div class="sub-title">Статус</div>${Object.entries(STATUS).map(([k, v]) => `<button data-c="status" data-s="${k}"><span class="st-dot inline" style="--c:${v.color}"></span>${v.label}${g.status === k ? `<span class="check">${I.check}</span>` : ''}</button>`).join('')}
     <hr><div class="sub-title">Коллекции</div>${cols}<button data-c="newcol">${I.plus}Новая коллекция…</button>
     <hr>
     <button data-c="edit">${I.edit}Изменить…</button>
@@ -503,6 +566,8 @@ function showCtx(id, x, y) {
     if (c === 'play') play(id);
     else if (c === 'open') openDetail(id);
     else if (c === 'fav') toggleFav(id);
+    else if (c === 'prof') play(id, Number(b.dataset.i));
+    else if (c === 'status') patchGame(id, { status: g.status === b.dataset.s ? '' : b.dataset.s });
     else if (c === 'col') toggleCollection(id, b.dataset.col);
     else if (c === 'newcol') newCollection(id);
     else if (c === 'edit') editModal(id);
@@ -563,7 +628,7 @@ function switchHtml(key, checked) {
   return `<label class="switch"><input type="checkbox" data-key="${esc(key)}" ${checked ? 'checked' : ''}><span></span></label>`;
 }
 
-function editModal(id) {
+function editModal(id, tab = 'main') {
   const g = S.games[id];
   if (!g) return;
   const ov = g.launchOverride && (g.launchOverride.path || g.launchOverride.uri) ? g.launchOverride : null;
@@ -571,7 +636,7 @@ function editModal(id) {
   const baseHow = base.type === 'uri' ? `через ${srcOf(g).label}` : base.path || '—';
   let mode = ov ? 'custom' : 'default';
   const body = `
-    <div class="tabs"><button class="on" data-tab="main">Основное</button><button data-tab="art">Обложка и баннер</button></div>
+    <div class="tabs"><button data-tab="main">Основное</button><button data-tab="profiles">Способы запуска</button><button data-tab="actions">Перед запуском</button><button data-tab="tags">Теги</button><button data-tab="art">Обложка и баннер</button></div>
     <div class="body">
       <div data-pane="main">
         <div class="field"><label>Название</label><input class="input" id="eName" value="${esc(nameOf(g))}" placeholder="${esc(g.name)}"></div>
@@ -585,6 +650,9 @@ function editModal(id) {
         </div>
         <div class="field"><label>Время в игре</label><div class="row"><span style="color:var(--text-2)">${esc(fmtTime(g.playtime, '0 мин'))} учтено Arcadia</span><button class="btn ghost danger" id="eReset" style="margin-left:auto">Сбросить</button></div></div>
       </div>
+      <div data-pane="profiles" class="hidden">${profilesPaneHtml(g)}</div>
+      <div data-pane="actions" class="hidden">${actionsPaneHtml(g)}</div>
+      <div data-pane="tags" class="hidden">${tagsPaneHtml(g)}</div>
       <div data-pane="art" class="hidden">
         <div class="field"><label>Обложка (вертикальная, 600×900)</label>
           <div class="img-edit"><div class="prev" id="pCover" style="${g.coverPath ? `background-image:url('${esc(img(g.coverPath, g))}')` : ''}"></div>
@@ -607,10 +675,48 @@ function editModal(id) {
   };
   setMode(mode);
   $('#eMode', el).onclick = (e) => { const b = e.target.closest('button'); if (b) setMode(b.dataset.m); };
-  $$('.tabs button', el).forEach((b) => (b.onclick = () => {
-    $$('.tabs button', el).forEach((x) => x.classList.toggle('on', x === b));
-    $$('[data-pane]', el).forEach((p) => p.classList.toggle('hidden', p.dataset.pane !== b.dataset.tab));
-  }));
+  const showTab = (t) => {
+    $$('.tabs button', el).forEach((x) => x.classList.toggle('on', x.dataset.tab === t));
+    $$('[data-pane]', el).forEach((p) => p.classList.toggle('hidden', p.dataset.pane !== t));
+  };
+  showTab(tab);
+  $$('.tabs button', el).forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
+  // launch profiles
+  const act = { zapret: (g.actions || {}).zapret || '', vpn: (g.actions || {}).vpn || '' };
+  const renumber = () => {
+    const cur = collectProfiles(el);
+    const sel = $('#profDef', el), v = sel.value;
+    sel.innerHTML = '<option value="-1">Обычный запуск</option>' + $$('.prof', el).map((r, i) => `<option value="${i}">${esc($('[data-k="name"]', r).value || 'Профиль ' + (i + 1))}</option>`).join('');
+    sel.value = [...sel.options].some((o) => o.value === v) ? v : '-1';
+    return cur;
+  };
+  el.addEventListener('input', (e) => { if (e.target.closest('.prof')) renumber(); });
+  el.addEventListener('click', async (e) => {
+    const ak = e.target.closest('[data-ak]');
+    if (ak) {
+      act[ak.dataset.ak] = ak.dataset.v;
+      $$(`[data-ak="${ak.dataset.ak}"]`, el).forEach((x) => x.classList.toggle('on', x === ak));
+      return;
+    }
+    const tg = e.target.closest('[data-tag]');
+    if (tg) {
+      const inp = $('#eTags', el);
+      const cur = inp.value.split(',').map((x) => x.trim()).filter(Boolean);
+      if (!cur.includes(tg.dataset.tag)) inp.value = [...cur, tg.dataset.tag].join(', ');
+      return;
+    }
+    const b = e.target.closest('[data-pa]');
+    if (!b) return;
+    const pa = b.dataset.pa;
+    if (pa === 'add') {
+      const list = $('#profList', el);
+      list.insertAdjacentHTML('beforeend', profileRow({ path: (g.launch && g.launch.path) || g.exePath || '' }, list.children.length));
+      $('.prof:last-child [data-k="name"]', list).focus();
+      renumber();
+    } else if (pa === 'del') { b.closest('.prof').remove(); renumber(); }
+    else if (pa === 'browse') { const p = await api.pickFile('exe'); if (p) b.closest('.row').querySelector('input').value = p; }
+    else if (pa === 'browse-before' || pa === 'browse-after') { const p = await api.pickFile('exe'); if (p) $(pa === 'browse-before' ? '#aBefore' : '#aAfter', el).value = p; }
+  });
   $('#eBrowse', el).onclick = async () => { const p = await api.pickFile('exe'); if (p) $('#eExe', el).value = p; };
   $('#eReset', el).onclick = async () => {
     if (await confirmModal('Сбросить время?', 'Время и история сессий этой игры в Arcadia будут обнулены.', 'Сбросить')) { await api.resetPlaytime(id); toast('Время сброшено', 'ok'); }
@@ -651,6 +757,10 @@ function editModal(id) {
       patch.launchOverride = { type: /^[a-z][\w+.-]*:\/\//i.test(p) && !/^[a-z]:\\/i.test(p) ? 'uri' : 'exe', path: p, uri: p, args: $('#eArgs', el).value.trim() };
       if (patch.launchOverride.type === 'exe') delete patch.launchOverride.uri; else delete patch.launchOverride.path;
     } else patch.launchOverride = null;
+    patch.profiles = collectProfiles(el);
+    patch.defaultProfile = Math.min(Number($('#profDef', el).value), patch.profiles.length - 1);
+    patch.actions = collectActions(el, act);
+    patch.tags = [...new Set($('#eTags', el).value.split(',').map((x) => x.trim()).filter(Boolean))];
     await patchGame(id, patch);
     close();
   };
@@ -675,7 +785,7 @@ function settingsModal(tab = 'library') {
     ['syncAccountsOnStart', 'Обновлять списки купленных игр', 'Не чаще раза в 12 часов, через 15 секунд после запуска'],
   ].map(([k, t, d]) => `<div class="toggle-row"><div><div class="t">${t}</div>${d ? `<div class="d">${d}</div>` : ''}</div>${switchHtml(k, !!st[k])}</div>`).join('');
   const body = `
-    <div class="tabs"><button data-tab="library">Библиотека</button><button data-tab="art">Обложки</button><button data-tab="behavior">Поведение</button><button data-tab="browser">Браузер</button><button data-tab="about">Данные</button></div>
+    <div class="tabs"><button data-tab="library">Библиотека</button><button data-tab="art">Обложки</button><button data-tab="behavior">Поведение</button><button data-tab="browser">Браузер</button><button data-tab="integrations">Интеграции</button><button data-tab="notify">Уведомления</button><button data-tab="about">Данные</button></div>
     <div class="body">
       <div data-pane="library">
         <div class="field"><label>Папки с играми без лаунчера (торренты, репаки, портативные)</label>
@@ -693,6 +803,7 @@ function settingsModal(tab = 'library') {
       </div>
       <div data-pane="behavior" class="hidden">
         ${beh}
+        <div class="toggle-row"><div><div class="t">Режим для ТВ по кнопке Start на геймпаде</div><div class="d">Полноэкранный интерфейс для управления геймпадом. Также открывается клавишей F10</div></div>${switchHtml('gamepadStart', st.gamepadStart !== false)}</div>
         <div class="toggle-row"><div><div class="t">Горячая клавиша для показа Arcadia</div><div class="d">Нажмите сочетание в поле. Backspace — отключить.</div></div><input class="input" id="hk" style="width:220px;text-align:center" readonly value="${esc(prettyHotkey(st.hotkey))}"></div>
       </div>
       <div data-pane="browser" class="hidden">
@@ -703,6 +814,8 @@ function settingsModal(tab = 'library') {
         <div class="toggle-row"><div><div class="t">Выгружать страницу, если уйти из «Магазинов»</div><div class="d">Через сколько секунд освободить память</div></div><select class="input" style="width:130px" data-bkey="unloadOnLeaveSec">${[[0, 'Сразу'], [30, '30 сек'], [120, '2 мин'], [600, '10 мин']].map(([v, l]) => `<option value="${v}" ${st.browser.unloadOnLeaveSec === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="toggle-row"><div><div class="t">Выгружать при сворачивании окна</div><div class="d">При скрытии в трей страница выгружается всегда</div></div><select class="input" style="width:130px" data-bkey="unloadOnMinimizeSec">${[[0, 'Сразу'], [60, '1 мин'], [300, '5 мин']].map(([v, l]) => `<option value="${v}" ${st.browser.unloadOnMinimizeSec === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       </div>
+      <div data-pane="integrations" class="hidden">${integrationsPaneHtml()}</div>
+      <div data-pane="notify" class="hidden">${notifyPaneHtml()}</div>
       <div data-pane="about" class="hidden">
         <div class="toggle-row"><div><div class="t">Папка с данными</div><div class="d">Библиотека, обложки и журнал работы</div></div><button class="btn" id="openData">${I.folder}Открыть</button></div>
         <div class="toggle-row"><div><div class="t">Вернуть удалённые игры</div><div class="d">Удалённых из библиотеки: ${(st.ignoredIds || []).length}. Они снова появятся после сканирования.</div></div><button class="btn" id="unignore" ${(st.ignoredIds || []).length ? '' : 'disabled'}>Вернуть</button></div>
@@ -723,7 +836,8 @@ function settingsModal(tab = 'library') {
     if (!k) return;
     if (k.startsWith('browser.')) return api.br.set({ [k.slice(8)]: e.target.checked });
     const v = e.target.checked;
-    const patch = k.startsWith('sources.') ? { sources: { [k.slice(8)]: v } } : { [k]: v };
+    const dot = k.indexOf('.');
+    const patch = dot > 0 ? { [k.slice(0, dot)]: { [k.slice(dot + 1)]: v } } : { [k]: v };
     await api.setSettings(patch);
   });
   const refreshFolders = () => { $('#fList', el).innerHTML = folders(); };
@@ -751,6 +865,7 @@ function settingsModal(tab = 'library') {
   $('#openData', el).onclick = () => api.openData();
   $('#unignore', el).onclick = () => { api.unignore(); toast('Удалённые игры вернутся после сканирования', 'ok'); };
   $('#quit', el).onclick = () => api.quit();
+  bindSettingsExtras(el);
   const hk = $('#hk', el);
   hk.onkeydown = async (e) => {
     e.preventDefault();
@@ -792,6 +907,10 @@ function bind() {
   $('#btnScan').onclick = () => api.scan();
   $('#btnSettings').onclick = () => settingsModal();
   $('#pillNet').onclick = () => netModal();
+  $('#btnRandom').innerHTML = I.dice;
+  $('#btnRandom').onclick = () => randomModal();
+  $('#btnTv').innerHTML = I.gamepad;
+  $('#btnTv').onclick = () => bpOpen();
 
   let searchT;
   $('#search').addEventListener('input', (e) => {
@@ -834,6 +953,23 @@ function bind() {
       e.stopPropagation();
       const a = actEl.dataset.act;
       if (a === 'play') return play(id);
+      if (a === 'play-menu') { const r = actEl.getBoundingClientRect(); return playMenu(id, r.left - 180, r.bottom + 6); }
+      if (a === 'filters') { ui.filtersOpen = !ui.filtersOpen; ui.lastHtml = ''; return render(); }
+      if (a === 'f-status') return setFilters({ status: actEl.dataset.v });
+      if (a === 'f-tag') { const f = curFilters(); const v = actEl.dataset.v; return setFilters({ genres: f.genres.includes(v) ? f.genres.filter((x) => x !== v) : [...f.genres, v] }); }
+      if (a === 'f-reset') return setFilters({ status: '', genres: [] });
+      if (a === 'tag-filter') { ui.filtersOpen = true; setFilters({ genres: [actEl.dataset.v] }); return go('all'); }
+      if (a === 'vmode') { S.settings.view = actEl.dataset.v; ui.lastHtml = ''; render(); return api.setSettings({ view: actEl.dataset.v }); }
+      if (a === 'hltb-refresh') return hltbFetch(id);
+      if (a === 'hltb-manual') return hltbManual(id);
+      if (a === 'hltb-open') { const g = S.games[id]; return api.openUrl((g.hltb && g.hltb.url) || 'https://howlongtobeat.com/?q=' + encodeURIComponent(nameOf(g))); }
+      if (a === 'edit-actions') return editModal(id, 'actions');
+      if (a === 'edit-tags') return editModal(id, 'tags');
+      if (a === 'settings-integrations') return settingsModal('integrations');
+      if (a === 'mon-install') { api.x('monitor-install'); return; }
+      if (a === 'mon-start') { const r = await api.x('monitor-start'); if (r && r.ok === false) toast(r.error, 'err'); else monPoll(true); return; }
+      if (a === 'mon-stop') { await api.x('monitor-stop'); ui.mon.data = null; return; }
+      if (a === 'mon-folder') return api.x('monitor-folder');
       if (a === 'fav') return toggleFav(id);
       if (a === 'back') return closeDetail();
       if (a === 'edit') return editModal(id);
@@ -861,8 +997,12 @@ function bind() {
     }
     if (card && !ui.detail) openDetail(id);
   });
+  view.addEventListener('change', (e) => {
+    const s = e.target.closest('[data-act-change="status"]');
+    if (s && ui.detail) patchGame(ui.detail, { status: s.value });
+  });
   view.addEventListener('dblclick', (e) => {
-    const card = e.target.closest('.card');
+    const card = e.target.closest('.card, .lrow');
     if (card && !e.target.closest('[data-act]')) { e.preventDefault(); play(card.dataset.id); }
   });
   view.addEventListener('contextmenu', (e) => {
@@ -873,13 +1013,13 @@ function bind() {
     showCtx(id, e.clientX, e.clientY);
   });
   view.addEventListener('keydown', (e) => {
-    const card = e.target.closest('.card');
+    const card = e.target.closest('.card, .lrow');
     if (card && e.key === 'Enter') play(card.dataset.id);
   });
   // drag a game card onto a collection (pointer-based: native HTML5 drag is reserved for files)
   let pd = null;
   view.addEventListener('mousedown', (e) => {
-    const card = e.target.closest('.card');
+    const card = e.target.closest('.card, .lrow');
     if (!card || e.button !== 0 || e.target.closest('[data-act]')) return;
     pd = { id: card.dataset.id, x: e.clientX, y: e.clientY, ghost: null, card };
   });
@@ -955,7 +1095,7 @@ function bind() {
   bind();
   // broken image files: drop the <img> so the generated fallback shows instead
   document.addEventListener('error', (e) => { if (e.target && e.target.tagName === 'IMG') e.target.style.visibility = 'hidden'; }, true);
-  api.onState((s) => { S = s; render(); });
+  api.onState((s) => { S = s; scheduleRender(); });
   api.onToast((t) => toast(t.msg, t.type));
   api.onOpenNet(() => netModal());
   S = await api.getState();
