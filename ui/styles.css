@@ -617,3 +617,11 @@ select.input { background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http:
 .tabs { overflow-x: auto; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
 .tabs button { white-space: nowrap; flex: none; padding: 12px 10px; }
+.mon-filter { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 30px 14px; }
+.mon-filter .chip .cnt { opacity: .7; }
+.mc-head { position: relative; padding-right: 26px; }
+.mc-hide { position: absolute; right: -4px; top: -2px; width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--text-3); cursor: pointer; opacity: 0; transition: opacity .15s; }
+.mc-hide svg { width: 14px; height: 14px; }
+.mon-card:hover .mc-hide { opacity: 1; }
+.mc-hide:hover { background: var(--panel-2); color: var(--text); }
+.mini-seg button { padding: 5px 10px; font-size: 12.5px; }

@@ -989,6 +989,11 @@ function bind() {
       if (a === 'mon-folder') return api.x('monitor-folder');
       if (a === 'osd-toggle') { const r = await api.x('osd-toggle'); if (r && S.extras) { S.extras.osd = { ...(S.extras.osd || {}), visible: r.visible }; ui.lastHtml = ''; render(); } return; }
       if (a === 'osd-set') return setOsd({ [actEl.dataset.k]: actEl.dataset.v });
+      if (a === 'osd-set-num') return setOsd({ [actEl.dataset.k]: Number(actEl.dataset.v) });
+      if (a === 'mon-kind') { const k = actEl.dataset.v, h = monCfg().hiddenKinds; return setMon({ hiddenKinds: h.includes(k) ? h.filter((x) => x !== k) : [...h, k] }); }
+      if (a === 'mon-virtual') return setMon({ showVirtual: !monCfg().showVirtual });
+      if (a === 'mon-hide') { toast(`«${actEl.dataset.v}» скрыто — вернуть можно над датчиками`, 'ok'); return setMon({ hidden: [...new Set([...monCfg().hidden, actEl.dataset.v])] }); }
+      if (a === 'mon-unhide') return setMon({ hidden: [] });
       if (a === 'osd-item') { const it = osdCfg().items; const v = actEl.dataset.v; return setOsd({ items: it.includes(v) ? it.filter((x) => x !== v) : OSD_ITEMS.map(([k]) => k).filter((k) => it.includes(k) || k === v) }); }
       if (a === 'osd-hk-clear') return setOsd({ hotkey: '' });
       if (a === 'mangohud-copy') { const r = await api.x('mangohud-config'); if (r && r.config) { try { await navigator.clipboard.writeText('MANGOHUD_CONFIG=' + r.config); toast('Скопировано: строка MANGOHUD_CONFIG', 'ok'); } catch { promptModal('Настройки MangoHud', 'MANGOHUD_CONFIG=' + r.config); } } return; }

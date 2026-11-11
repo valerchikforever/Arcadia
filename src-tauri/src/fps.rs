@@ -162,13 +162,14 @@ pub fn helper_main(args: &[String]) -> i32 {
     }
     let mut ticks = 0u64;
     loop {
-        std::thread::sleep(Duration::from_millis(1000));
+        // report twice a second (fps over the last second) so the overlay lags at most ~0.5 s
+        std::thread::sleep(Duration::from_millis(500));
         ticks += 1;
         let apps = agg.lock().unwrap().report(Instant::now());
         let pm_alive = pm.as_mut().map(|c| c.try_wait().ok().flatten().is_none()).unwrap_or(false);
         write_json(&dir, &json!({ "t": crate::util::common::now_ms(), "pm": pm_alive, "error": if pm_alive { "" } else { pm_error.as_str() }, "apps": apps }));
         let stop = dir.join("stop.flag").exists();
-        if stop || (ticks % 3 == 0 && !arcadia_alive(parent)) {
+        if stop || (ticks % 6 == 0 && !arcadia_alive(parent)) {
             log(&dir, if stop { "stop requested" } else { "Arcadia exited" });
             let _ = std::fs::remove_file(dir.join("stop.flag"));
             if let Some(mut c) = pm.take() {

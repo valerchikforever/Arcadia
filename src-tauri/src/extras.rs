@@ -417,11 +417,11 @@ fn monitor_running() -> bool {
 
 const LHM_PORT: u16 = crate::sensors::LHM_PORT;
 
-/// LHM settings: web server on, start minimized to tray (it is our sensor backend)
+/// LHM settings: web server on, start minimized to tray, sensors every 0.5 s (it is our sensor backend)
 fn configure_monitor() {
     let f = monitor_dir().join("LibreHardwareMonitor.config");
     let mut xml = std::fs::read_to_string(&f).unwrap_or_else(|_| "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<configuration>\n  <appSettings>\n  </appSettings>\n</configuration>\n".into());
-    for (k, v) in [("runWebServerMenuItem", "true"), ("listenerPort", &LHM_PORT.to_string()[..]), ("startMinMenuItem", "true"), ("minTrayMenuItem", "true"), ("minCloseMenuItem", "true")] {
+    for (k, v) in [("runWebServerMenuItem", "true"), ("listenerPort", &LHM_PORT.to_string()[..]), ("startMinMenuItem", "true"), ("minTrayMenuItem", "true"), ("minCloseMenuItem", "true"), ("updateIntervalMenuItem", "1")] {
         let re = regex::Regex::new(&format!(r#"<add key="{}" value="[^"]*"\s*/>"#, k)).unwrap();
         let line = format!(r#"<add key="{}" value="{}" />"#, k, v);
         if re.is_match(&xml) {
@@ -643,7 +643,12 @@ pub fn parse_lhm(tree: &Value) -> Vec<Value> {
                 }
             }
             if !groups.is_empty() {
-                out.push(json!({ "name": n["Text"], "kind": kind(&img), "groups": groups }));
+                // memory modules (SPD: capacity, timings) are not the "Memory" usage sensor
+                let mut k = kind(&img);
+                if k == "ram" && !groups.contains_key("Load") && !groups.contains_key("Data") {
+                    k = "dimm";
+                }
+                out.push(json!({ "name": n["Text"], "kind": k, "groups": groups }));
             }
         }
         for c in &children {

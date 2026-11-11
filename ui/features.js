@@ -264,7 +264,7 @@ function monPoll(on) {
     render();
   };
   tick();
-  ui.mon.timer = setInterval(tick, 1500);
+  ui.mon.timer = setInterval(tick, 1000);
 }
 function spark(arr, color) {
   if (!arr || arr.length < 2) return '';
@@ -278,10 +278,33 @@ const MON_PICK = {
   ram: [['Load', /memory/i, 'Загрузка'], ['Data', /memory used|used memory/i, 'Занято'], ['Data', /memory available|available memory/i, 'Свободно']],
   disk: [['Temperatures', /./, 'Температура'], ['Load', /used space/i, 'Занято места'], ['Throughput', /read/i, 'Чтение'], ['Throughput', /write/i, 'Запись']],
 };
-const MON_LABEL = { cpu: 'Процессор', gpu: 'Видеокарта', ram: 'Память', disk: 'Диск', board: 'Материнская плата', net: 'Сеть' };
+const MON_LABEL = { cpu: 'Процессор', gpu: 'Видеокарта', ram: 'Память', dimm: 'Модуль памяти', disk: 'Диск', board: 'Материнская плата', net: 'Сеть', other: 'Устройство' };
+const MON_KINDS = [['cpu', 'Процессор'], ['gpu', 'Видеокарта'], ['ram', 'Память'], ['dimm', 'Модули памяти'], ['disk', 'Диски'], ['board', 'Мат. плата'], ['net', 'Сеть']];
+// Windows lists every virtual network adapter (WFP / QoS filters, Wi-Fi Direct "Подключение по локальной сети*", VPN taps…)
+const VIRTUAL_NET = /-WFP|QoS|Filter Driver|Native WiFi|Virtual|WAN Miniport|Teredo|isatap|Loopback|Pseudo|Kernel Debug|Bluetooth|\*\s*\d+|TAP-|Wintun|vEthernet|Hyper-V|VMware|VirtualBox/i;
+const monCfg = () => ({ hiddenKinds: [], hidden: [], showVirtual: false, ...(S.settings.monitor || {}) });
+function setMon(patch) {
+  S.settings.monitor = { ...monCfg(), ...patch };
+  ui.lastHtml = '';
+  render();
+  api.setSettings({ monitor: patch });
+}
+const monVisible = (h, c = monCfg()) => !c.hiddenKinds.includes(h.kind) && !c.hidden.includes(h.name) && (c.showVirtual || h.kind !== 'net' || !VIRTUAL_NET.test(h.name));
+function monFilterHtml(hw) {
+  const c = monCfg();
+  const count = (k) => hw.filter((h) => h.kind === k).length;
+  const virt = hw.filter((h) => h.kind === 'net' && VIRTUAL_NET.test(h.name)).length;
+  const hiddenN = hw.filter((h) => !monVisible(h, c)).length;
+  return `<div class="mon-filter"><span class="op-k" style="margin:0">Показывать</span>
+    ${MON_KINDS.filter(([k]) => count(k)).map(([k, l]) => `<button class="chip${c.hiddenKinds.includes(k) ? '' : ' on'}" data-act="mon-kind" data-v="${k}">${l} <span class="cnt">${count(k)}</span></button>`).join('')}
+    ${virt ? `<button class="chip${c.showVirtual ? ' on' : ''}" data-act="mon-virtual" title="Фильтры WFP/QoS, Wi-Fi Direct, адаптеры VPN и виртуальных машин">Виртуальные адаптеры <span class="cnt">${virt}</span></button>` : ''}
+    <span class="grow"></span>
+    ${c.hidden.length ? `<button class="link-btn" data-act="mon-unhide">вернуть скрытые вручную (${c.hidden.length})</button>` : ''}
+    ${hiddenN ? `<span class="muted-note">скрыто ${hiddenN}</span>` : ''}</div>`;
+}
 const OSD_ITEMS = [['fps', 'FPS'], ['frametime', 'Время кадра'], ['low1', '1% low'], ['cpu', 'Загрузка CPU'], ['cputemp', 'Температура CPU'], ['cpuclk', 'Частота CPU'],
   ['gpu', 'Загрузка GPU'], ['gputemp', 'Температура GPU'], ['gpuclk', 'Частота GPU'], ['gpupower', 'Мощность GPU'], ['vram', 'Видеопамять'], ['ram', 'Память'], ['session', 'Игра и время сессии'], ['clock', 'Часы']];
-const osdCfg = () => ({ enabled: true, autoShow: true, hotkey: 'Shift+F12', position: 'tl', scale: 1, opacity: 0.55, items: [], mangohud: false, linuxWindow: false, ...(S.settings.osd || {}) });
+const osdCfg = () => ({ enabled: true, autoShow: true, hotkey: 'Shift+F12', position: 'tl', scale: 1, opacity: 0.55, interval: 1000, items: [], mangohud: false, linuxWindow: false, ...(S.settings.osd || {}) });
 function setOsd(patch) {
   S.settings.osd = { ...osdCfg(), ...patch };
   ui.lastHtml = '';
@@ -309,6 +332,8 @@ function osdPanelHtml() {
       <div class="op-col narrow">
         <div class="op-k">Угол экрана</div>
         <div class="corners">${corner('tl', 'Слева сверху')}${corner('tr', 'Справа сверху')}${corner('bl', 'Слева снизу')}${corner('br', 'Справа снизу')}</div>
+        <div class="op-k">Обновлять</div>
+        <div class="seg mini-seg">${[[500, '0,5 с'], [1000, '1 с'], [2000, '2 с']].map(([v, l]) => `<button data-act="osd-set-num" data-k="interval" data-v="${v}" class="${Number(o.interval || 1000) === v ? 'on' : ''}">${l}</button>`).join('')}</div>
         <div class="op-k">Размер · фон</div>
         <div class="row"><select class="input" data-osd-change="scale">${[0.8, 1, 1.25, 1.5, 2].map((v) => `<option value="${v}" ${Number(o.scale) === v ? 'selected' : ''}>${Math.round(v * 100)}%</option>`).join('')}</select>
           <input type="range" min="0" max="0.9" step="0.05" value="${o.opacity}" data-osd-change="opacity" title="Прозрачность фона"></div>
@@ -355,9 +380,11 @@ function renderMonitor() {
   return head + panel + body;
 }
 
-function monGridHtml(hw) {
-  const color = { cpu: '#60a5fa', gpu: '#4ade80', ram: '#c084fc', disk: '#fbbf24', board: '#94a3b8', net: '#22d3ee' };
-  const order = ['cpu', 'gpu', 'ram', 'disk', 'board', 'net'];
+function monGridHtml(all) {
+  const color = { cpu: '#60a5fa', gpu: '#4ade80', ram: '#c084fc', dimm: '#a78bfa', disk: '#fbbf24', board: '#94a3b8', net: '#22d3ee' };
+  const order = ['cpu', 'gpu', 'ram', 'disk', 'board', 'net', 'dimm'];
+  const hw = all.filter((h) => monVisible(h));
+  if (!hw.length) return monFilterHtml(all) + '<div class="empty small"><p>Все датчики скрыты — включите нужные категории выше.</p></div>';
   const cards = [...hw].sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind)).map((h) => {
     const picks = [];
     for (const [grp, re, label] of MON_PICK[h.kind] || []) {
@@ -366,11 +393,11 @@ function monGridHtml(hw) {
     }
     const metrics = picks.length ? picks : Object.entries(h.groups).slice(0, 2).flatMap(([grp, l]) => l.slice(0, 2).map((s) => ({ label: s.name, s, grp })));
     const key = `${h.name}`;
-    return `<div class="mon-card" style="--c:${color[h.kind] || '#aaa'}"><div class="mc-head"><span class="mc-kind">${esc(MON_LABEL[h.kind] || 'Устройство')}</span><span class="mc-name">${esc(h.name)}</span></div>
+    return `<div class="mon-card" style="--c:${color[h.kind] || '#aaa'}"><div class="mc-head"><span class="mc-kind">${esc(MON_LABEL[h.kind] || 'Устройство')}</span><span class="mc-name">${esc(h.name)}</span><button class="mc-hide" data-act="mon-hide" data-v="${esc(h.name)}" title="Скрыть это устройство">${I.x}</button></div>
       <div class="mc-grid">${metrics.map(({ label, s, grp }) => `<div class="mc-m"><div class="k">${esc(label)}</div><div class="v">${esc(s.value)}</div>${s.max ? `<div class="mx">макс ${esc(s.max)}</div>` : ''}${spark(ui.mon.hist[`${h.name}|${grp}|${s.name}`], color[h.kind] || '#aaa')}</div>`).join('')}</div>
       <details data-key="${esc(key)}" ${(ui.mon.open || {})[key] ? 'open' : ''}><summary>Все датчики</summary>${Object.entries(h.groups).map(([g, l]) => `<div class="mc-grp"><b>${esc(g)}</b>${l.map((s) => `<div class="mc-row"><span>${esc(s.name)}</span><span>${esc(s.value)}</span></div>`).join('')}</div>`).join('')}</details></div>`;
   }).join('');
-  return `<div class="mon-grid">${cards}</div>`;
+  return monFilterHtml(all) + `<div class="mon-grid">${cards}</div>`;
 }
 
 // keyboard shortcut capture for the overlay hotkey ("Shift+F12", "Ctrl+Alt+O")

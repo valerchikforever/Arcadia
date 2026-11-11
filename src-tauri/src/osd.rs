@@ -18,7 +18,7 @@ pub const ITEMS: &[&str] = &["fps", "frametime", "low1", "cpu", "cputemp", "cpuc
 
 pub fn defaults() -> Value {
     json!({
-        "enabled": true, "autoShow": true, "hotkey": "Shift+F12", "position": "tl", "scale": 1.0, "opacity": 0.55,
+        "enabled": true, "autoShow": true, "hotkey": "Shift+F12", "position": "tl", "scale": 1.0, "opacity": 0.55, "interval": 1000,
         "items": ["fps", "frametime", "low1", "cpu", "cputemp", "gpu", "gputemp", "vram", "ram"],
         "mangohud": false, "linuxWindow": false,
     })
@@ -155,6 +155,15 @@ fn place(w: &tauri::WebviewWindow, cfg: &Value) {
     let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
 }
 
+fn alive(gen: u64) -> bool {
+    GEN.load(Ordering::SeqCst) == gen && VISIBLE.load(Ordering::SeqCst)
+}
+
+/// Update period: 0.5 / 1 / 2 s (settings), measured from tick to tick — reading sensors doesn't stretch it
+fn period() -> std::time::Duration {
+    std::time::Duration::from_millis(settings()["interval"].as_u64().unwrap_or(1000).clamp(250, 5000))
+}
+
 pub fn show() {
     if VISIBLE.swap(true, Ordering::SeqCst) {
         return;
@@ -169,8 +178,12 @@ pub fn show() {
                 return;
             }
         };
-        // let the page load before the first frame of data
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        // first data before the window appears, so it never shows empty
+        let first = frame().await;
+        if !alive(gen) {
+            return;
+        }
+        let _ = w.emit_to("osd", "osd", first);
         place(&w, &settings());
         #[cfg(windows)]
         show_no_activate(&w);
@@ -183,18 +196,39 @@ pub fn show() {
             }
         }
         app().push();
+        let mut tick = tokio::time::interval(period());
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        tick.tick().await;
         let mut n = 0u64;
-        while GEN.load(Ordering::SeqCst) == gen && VISIBLE.load(Ordering::SeqCst) {
+        loop {
+            tick.tick().await;
+            if !alive(gen) {
+                break;
+            }
             let payload = frame().await;
+            // "Скрыть" could have been pressed while the sensors were read: never show it again then
+            if !alive(gen) {
+                break;
+            }
             let _ = w.emit_to("osd", "osd", payload);
             n += 1;
-            if n % 3 == 0 {
+            if n % 4 == 0 {
                 // games and other topmost windows can push it back; follow the game to its monitor
                 place(&w, &settings());
                 #[cfg(windows)]
-                show_no_activate(&w);
+                if alive(gen) {
+                    show_no_activate(&w);
+                }
             }
-            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+            if tick.period() != period() {
+                tick = tokio::time::interval(period());
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                tick.tick().await;
+            }
+        }
+        // the last word is "hidden", whatever happened during the final tick
+        if !VISIBLE.load(Ordering::SeqCst) {
+            let _ = w.hide();
         }
     });
 }

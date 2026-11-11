@@ -145,7 +145,20 @@ fn nvidia(out: &mut Vec<Value>) {
 }
 
 // ---------------- CPU load / memory (sysinfo, both systems) ----------------
-static SYS: Lazy<Mutex<sysinfo::System>> = Lazy::new(|| Mutex::new(sysinfo::System::new()));
+/// CPU load is the difference between two samples: the counter is primed once at start and sampled
+/// at most every 400 ms — two samples close together (two readers at once) read as 100 %
+struct Cpu {
+    sys: sysinfo::System,
+    at: Instant,
+    load: f64,
+}
+static SYS: Lazy<Mutex<Cpu>> = Lazy::new(|| {
+    let mut sys = sysinfo::System::new_with_specifics(sysinfo::RefreshKind::nothing().with_cpu(sysinfo::CpuRefreshKind::everything()).with_memory(sysinfo::MemoryRefreshKind::everything()));
+    std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
+    sys.refresh_cpu_usage();
+    let load = sys.global_cpu_usage() as f64;
+    Mutex::new(Cpu { sys, at: Instant::now(), load })
+});
 
 fn cpu_name() -> String {
     static N: Lazy<String> = Lazy::new(|| {
@@ -157,11 +170,17 @@ fn cpu_name() -> String {
 }
 
 fn basic_cpu_ram(cpu: &mut Hw, out_ram: &mut Hw) {
-    let mut s = SYS.lock().unwrap();
-    s.refresh_cpu_usage();
-    s.refresh_cpu_frequency();
-    s.refresh_memory();
-    cpu.add("Load", "CPU Total", s.global_cpu_usage() as f64, "%");
+    let mut c = SYS.lock().unwrap();
+    if c.at.elapsed() >= std::time::Duration::from_millis(400) {
+        c.sys.refresh_cpu_usage();
+        c.sys.refresh_cpu_frequency();
+        c.load = c.sys.global_cpu_usage() as f64;
+        c.at = Instant::now();
+    }
+    c.sys.refresh_memory();
+    let load = c.load;
+    let s = &c.sys;
+    cpu.add("Load", "CPU Total", load, "%");
     let fr: Vec<f64> = s.cpus().iter().map(|c| c.frequency() as f64).filter(|f| *f > 0.0).collect();
     if !fr.is_empty() {
         cpu.add("Clocks", "Cores (Average)", fr.iter().sum::<f64>() / fr.len() as f64, "MHz");
@@ -370,10 +389,25 @@ pub fn native() -> Vec<Value> {
 
 /// LHM's web server (Windows module)
 pub const LHM_PORT: u16 = 8085;
-static LOCAL: Lazy<reqwest::Client> = Lazy::new(|| reqwest::Client::builder().no_proxy().timeout(std::time::Duration::from_secs(3)).build().unwrap());
+static LOCAL: Lazy<reqwest::Client> = Lazy::new(|| reqwest::Client::builder().no_proxy().timeout(std::time::Duration::from_millis(800)).build().unwrap());
+
+/// One reading shared by everyone who asks within 400 ms (overlay + Monitor page)
+static LAST: Lazy<tokio::sync::Mutex<(Option<Instant>, Value)>> = Lazy::new(|| tokio::sync::Mutex::new((None, Value::Null)));
 
 /// Full readings: { ok, hardware, source: "lhm" | "native", error? }
 pub async fn read() -> Value {
+    let mut last = LAST.lock().await;
+    if let (Some(at), false) = (last.0, last.1.is_null()) {
+        if at.elapsed() < std::time::Duration::from_millis(400) {
+            return last.1.clone();
+        }
+    }
+    let v = read_now().await;
+    *last = (Some(Instant::now()), v.clone());
+    v
+}
+
+async fn read_now() -> Value {
     if cfg!(windows) {
         if let Ok(r) = LOCAL.get(format!("http://127.0.0.1:{}/data.json", LHM_PORT)).send().await {
             if let Ok(t) = r.json::<Value>().await {
@@ -397,7 +431,10 @@ pub fn summary(hw: &[Value]) -> Value {
     };
     let mut o = json!({});
     if let Some(c) = find("cpu").first() {
-        o["cpu"] = json!(pick(c, "Load", r"(?i)total"));
+        o["cpu"] = json!(pick(c, "Load", r"(?i)^cpu total$").or_else(|| pick(c, "Load", r"(?i)total")).or_else(|| {
+            let l: Vec<f64> = c["groups"]["Load"].as_array()?.iter().filter(|s| regex::Regex::new(r"(?i)^cpu core #\d+$").unwrap().is_match(s["name"].as_str().unwrap_or(""))).filter_map(|s| num(&s["value"])).collect();
+            (!l.is_empty()).then(|| l.iter().sum::<f64>() / l.len() as f64)
+        }));
         o["cputemp"] = json!(pick(c, "Temperatures", r"(?i)package|tctl|tdie").or_else(|| pick(c, "Temperatures", r"(?i)core|cpu")));
         o["cpuclk"] = json!(pick(c, "Clocks", r"(?i)average").or_else(|| {
             let l: Vec<f64> = c["groups"]["Clocks"].as_array()?.iter().filter(|s| s["name"].as_str().unwrap_or("").contains("Core #")).filter_map(|s| num(&s["value"])).collect();
@@ -458,3 +495,4 @@ mod tests {
         assert!(b.iter().any(|h| h["kind"] == "cpu"));
     }
 }
+
