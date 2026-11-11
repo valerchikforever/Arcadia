@@ -81,7 +81,13 @@ jobs:
         working-directory: src-tauri
         run: cargo test --lib
       - name: Build .deb, .rpm and AppImage
-        run: npx tauri build --bundles deb,rpm,appimage
+        # the AppImage tools are downloaded during bundling: retry on network hiccups
+        run: |
+          for i in 1 2 3; do
+            npx tauri build --bundles deb,rpm,appimage && exit 0
+            echo "bundling failed (attempt $i), retrying in 20 s"; sleep 20
+          done
+          exit 1
       - name: Collect files
         run: |
           v="${TAG#v}"
