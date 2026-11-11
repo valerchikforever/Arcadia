@@ -25,7 +25,29 @@ function netSwitch(key, checked, label, desc, disabled) {
 }
 
 // ---------- zapret ----------
+// Linux: zapret by bol-van, installed as a service (install_easy.sh); the strategy lives in /opt/zapret/config
+function zapretLinuxHtml(z) {
+  if (!z.valid) {
+    return `${powerHtml('z', false, false, 'Zapret не установлен', 'Нужна сборка zapret для Linux', true)}
+      <div class="net-help">
+        <p>Zapret обходит замедление и блокировки YouTube, Discord и других сайтов без VPN — интернет идёт напрямую, пинг в играх не растёт.</p>
+        <p>На Linux поставьте <a class="link" data-na="open-url" data-url="https://github.com/bol-van/zapret/releases">zapret от bol-van</a>: распакуйте архив и выполните <code>sudo ./install_easy.sh</code> — он подберёт стратегию для вашего провайдера и установит службу в <code>/opt/zapret</code>. Дальше Arcadia включает и выключает её одной кнопкой.</p>
+      </div>
+      <div class="row" style="margin-top:14px"><button class="btn" data-na="z-detect">${I.search}Найти установку</button><button class="btn ghost" data-na="z-pick">${I.folder}Указать папку</button></div>
+      ${z.detected ? `<div class="detected">${z.detected.length ? z.detected.map((d) => `<button class="folder-item pick" data-na="z-use" data-dir="${esc(d)}">${I.folder}<span class="p">${esc(d)}</span><span class="chip">Выбрать</span></button>`).join('') : '<div class="hint">Установка zapret не найдена в /opt/zapret и в домашней папке.</div>'}</div>` : ''}`;
+  }
+  const sub = z.busy ? 'Ждём пароль администратора…' : z.running ? 'Служба zapret работает (nfqws)' : 'Нажмите, чтобы включить обход блокировок';
+  return `${powerHtml('z', z.running, z.busy, z.running ? 'Zapret включён' : 'Zapret выключен', sub)}
+    ${z.error ? `<div class="net-error">${I.alert}<span>${esc(z.error)}</span></div>` : ''}
+    ${netSwitch('z.autostart', z.autostart, 'Включать вместе с Arcadia', 'Система спросит пароль администратора при запуске')}
+    ${netSwitch('z.stopOnExit', z.stopOnExit, 'Выключать при выходе из Arcadia', '')}
+    <div class="field" style="margin-top:14px"><label>Установка zapret</label>
+      <div class="row"><span class="path">${esc(z.dir)}</span><button class="btn ghost" data-na="z-open">${I.folder}Открыть папку</button></div></div>
+    <div class="hint">Стратегия хранится в <code>${esc(z.dir)}/config</code> (параметр <code>NFQWS_OPT</code>). Если сайты не открываются, подберите новую: <code>sudo ${esc(z.dir)}/blockcheck.sh</code>, затем перезапустите службу здесь. Свои сайты — в <code>ipset/zapret-hosts-user.txt</code>.</div>`;
+}
+
 function zapretHtml(z) {
+  if (z.linux) return zapretLinuxHtml(z);
   if (!z.valid) {
     return `${powerHtml('z', false, false, 'Zapret не настроен', 'Укажите папку, куда распакован zapret', true)}
       <div class="net-help">
@@ -116,7 +138,6 @@ function reportLinkErrors(errors) {
 function netModal(tab) {
   if ($('.overlay.net-ov')) return;
   if (!S.net) return toast('Модуль ещё загружается', 'err');
-  if (S.platform && S.platform !== 'win32') toast('Zapret и VPN работают только в Windows', 'err');
   const local = { tab: tab || ui.netTab || 'zapret', detected: null };
   const body = `
     <div class="tabs"><button data-ntab="zapret">${I.zap}Zapret</button><button data-ntab="vpn">${I.globe}VPN</button></div>
@@ -152,7 +173,7 @@ function netModal(tab) {
     setRegion('vt', vpnTopHtml(S.net.vpn));
     setRegion('vl', vpnListHtml(S.net.vpn));
     setRegion('vo', vpnOptsHtml(S.net.vpn) + vpnExtrasHtml(S.net.vpn));
-    setRegion('za', S.net.zapret.valid ? `<div class="subhead">Автоподбор</div>${autopickHtml()}` : '');
+    setRegion('za', S.net.zapret.valid && !S.net.zapret.linux ? `<div class="subhead">Автоподбор</div>${autopickHtml()}` : '');
   };
   ui.netRefresh = refresh;
   refresh();

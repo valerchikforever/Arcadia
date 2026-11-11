@@ -1,6 +1,7 @@
 pub mod epic;
 pub mod folders;
 pub mod gog_time;
+pub mod linux;
 pub mod manual;
 pub mod registry;
 pub mod steam;
@@ -63,7 +64,7 @@ pub fn scan_all(settings: &Value, extra_claimed: &[String], ctx: Option<Ctx>) ->
     let mut status = Map::new();
     let mut ids = HashSet::new();
     type ScanFn = fn(&Ctx) -> Vec<Value>;
-    let list: [(&str, ScanFn); 7] = [
+    let list: [(&str, ScanFn); 9] = [
         ("steam", steam::scan),
         ("epic", epic::scan),
         ("gog", registry::scan_gog),
@@ -71,6 +72,8 @@ pub fn scan_all(settings: &Value, extra_claimed: &[String], ctx: Option<Ctx>) ->
         ("ubisoft", registry::scan_ubisoft),
         ("battlenet", registry::scan_battlenet),
         ("battlestate", registry::scan_battlestate),
+        ("heroic", linux::scan_heroic),
+        ("lutris", linux::scan_lutris),
     ];
     for (key, f) in list {
         if sources[key] == json!(false) {

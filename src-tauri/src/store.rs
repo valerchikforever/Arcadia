@@ -30,6 +30,9 @@ pub fn default_settings() -> Value {
         "installFilter": "all",
         "syncAccountsOnStart": true,
         "browser": { "economy": true, "blockTrackers": true, "autoEnable": false, "unloadOnMinimizeSec": 60, "unloadOnLeaveSec": 30 },
+        "osd": crate::osd::defaults(),
+        "monitor": { "taskExe": "" },
+        "linux": { "runner": "wine", "winePrefix": "", "protonPath": "", "customRunner": "" },
         "notify": { "downloads": true, "freeGames": true, "wishlist": true, "vpn": true, "torrents": true, "zapret": true, "test": true },
         "discord": { "enabled": false, "clientId": "", "steamToo": false },
         "torrent": { "enabled": false, "url": "http://127.0.0.1:8080", "user": "admin", "pass": "" },
@@ -83,8 +86,7 @@ pub fn data_dir() -> PathBuf {
             return PathBuf::from(a).join("Arcadia");
         }
     }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    PathBuf::from(home).join(".config").join("Arcadia")
+    PathBuf::from(crate::util::linux::config_home()).join("Arcadia")
 }
 
 impl Store {
@@ -129,6 +131,13 @@ impl Store {
         }
         let tmp = self.file.with_extension("json.tmp");
         if fs::write(&tmp, txt).is_ok() {
+            // sign-in tokens live here: on Linux keep the file private to the user
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
+                let _ = fs::set_permissions(self.file.with_extension("json.bak"), fs::Permissions::from_mode(0o600));
+            }
             let _ = fs::rename(&tmp, &self.file);
         }
     }

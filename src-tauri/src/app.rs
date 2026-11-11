@@ -36,6 +36,11 @@ pub fn app() -> &'static Arc<App> {
     APP.get().expect("app not initialised")
 }
 
+/// The app, if it is running (unit tests run code without it)
+pub fn try_app() -> Option<&'static Arc<App>> {
+    APP.get()
+}
+
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 impl App {

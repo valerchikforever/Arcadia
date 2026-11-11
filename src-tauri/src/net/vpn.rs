@@ -4,14 +4,22 @@ use crate::util::common::nz;
 use super::links::parse_many;
 use crate::app::app;
 use crate::util::common::{exists, hash_id, now_ms, parent, s};
-use crate::util::winsys::{process_names, ps_quote, quiet, refresh_inet_settings, run_elevated};
+use crate::util::winsys::{process_names, ps_quote, quiet, run_elevated};
+#[cfg(windows)]
+use crate::util::winsys::refresh_inet_settings;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Child;
 
+#[cfg(windows)]
 pub const CORE_NAME: &str = "arcadia-core.exe";
+#[cfg(windows)]
 pub const XRAY_NAME: &str = "arcadia-xray.exe";
+#[cfg(not(windows))]
+pub const CORE_NAME: &str = "arcadia-core";
+#[cfg(not(windows))]
+pub const XRAY_NAME: &str = "arcadia-xray";
 
 #[derive(Default)]
 pub struct Vpn {
@@ -323,9 +331,6 @@ pub async fn ping_all() {
 
 // ---------------- cores ----------------
 async fn install_from_github(repo: &str, asset_re: &str, exe_name: &str, target: &str, label: &str, extra_re: &str, set: impl Fn(&str)) -> Result<(), String> {
-    if !cfg!(windows) {
-        return Err("Доступно только в Windows".into());
-    }
     set("Ищем последнюю версию…");
     let r = app().http.get(format!("https://api.github.com/repos/{}/releases/latest", repo)).header("User-Agent", "ArcadiaLauncher").header("Accept", "application/vnd.github+json").send().await.map_err(|e| e.to_string())?;
     if !r.status().is_success() {
@@ -333,7 +338,8 @@ async fn install_from_github(repo: &str, asset_re: &str, exe_name: &str, target:
     }
     let rel: Value = r.json().await.map_err(|e| e.to_string())?;
     let are = regex::Regex::new(asset_re).unwrap();
-    let a = rel["assets"].as_array().and_then(|a| a.iter().find(|x| are.is_match(x["name"].as_str().unwrap_or("")))).ok_or(format!("Не найден архив {} для Windows", label))?;
+    let a = rel["assets"].as_array().and_then(|a| a.iter().find(|x| are.is_match(x["name"].as_str().unwrap_or("")))).ok_or(format!("Не найден архив {} для {}", label, if cfg!(windows) { "Windows" } else { "Linux" }))?;
+    let asset_name = s(a, "name");
     set(&format!("Скачиваем {} {}…", label, s(&rel, "tag_name")));
     let z = app().http.get(s(a, "browser_download_url")).header("User-Agent", "ArcadiaLauncher").send().await.map_err(|e| e.to_string())?;
     if !z.status().is_success() {
@@ -343,14 +349,36 @@ async fn install_from_github(repo: &str, asset_re: &str, exe_name: &str, target:
     set("Распаковываем…");
     let dir = core_dir();
     let xre = regex::Regex::new(extra_re).unwrap();
-    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
     let mut found = false;
-    for i in 0..zip.len() {
-        let mut f = zip.by_index(i).map_err(|e| e.to_string())?;
-        let name = f.name().rsplit('/').next().unwrap_or("").to_string();
-        let dest = if name.eq_ignore_ascii_case(exe_name) { found = true; dir.join(target) } else if xre.is_match(&name) { dir.join(&name) } else { continue };
-        let mut out = std::fs::File::create(&dest).map_err(|e| format!("{} (ядро сейчас запущено?)", e))?;
-        std::io::copy(&mut f, &mut out).map_err(|e| e.to_string())?;
+    let mut put = |name: &str, r: &mut dyn std::io::Read| -> Result<(), String> {
+        let dest = if name.eq_ignore_ascii_case(exe_name) { found = true; dir.join(target) } else if xre.is_match(name) { dir.join(name) } else { return Ok(()) };
+        // a running core keeps its file busy: write next to it and swap
+        let tmp = dest.with_extension("new");
+        let mut out = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+        std::io::copy(r, &mut out).map_err(|e| e.to_string())?;
+        drop(out);
+        std::fs::rename(&tmp, &dest).map_err(|e| format!("{} (ядро сейчас запущено?)", e))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755));
+        }
+        Ok(())
+    };
+    if asset_name.to_lowercase().ends_with(".tar.gz") {
+        let mut ar = tar::Archive::new(flate2::read::GzDecoder::new(std::io::Cursor::new(bytes)));
+        for e in ar.entries().map_err(|e| e.to_string())? {
+            let mut e = e.map_err(|e| e.to_string())?;
+            let name = e.path().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string())).unwrap_or_default();
+            put(&name, &mut e)?;
+        }
+    } else {
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
+        for i in 0..zip.len() {
+            let mut f = zip.by_index(i).map_err(|e| e.to_string())?;
+            let name = f.name().rsplit('/').next().unwrap_or("").to_string();
+            put(&name, &mut f)?;
+        }
     }
     if !found {
         return Err(format!("В архиве нет {}", exe_name));
@@ -362,7 +390,8 @@ pub async fn install_core() -> Result<(), String> {
     if app().vpn.lock().unwrap().running {
         let _ = tauri::async_runtime::spawn_blocking(|| stop(true)).await;
     }
-    let r = install_from_github("SagerNet/sing-box", r"(?i)windows-amd64\.zip$", "sing-box.exe", CORE_NAME, "sing-box", r"(?i)\.dll$", |t| {
+    let (asset, exe) = if cfg!(windows) { (r"(?i)windows-amd64\.zip$", "sing-box.exe") } else { (r"(?i)^sing-box-[\d.]+-linux-amd64\.tar\.gz$", "sing-box") };
+    let r = install_from_github("SagerNet/sing-box", asset, exe, CORE_NAME, "sing-box", r"(?i)\.dll$", |t| {
         app().vpn.lock().unwrap().installing = t.to_string();
         app().push();
     })
@@ -377,7 +406,8 @@ pub async fn install_core() -> Result<(), String> {
 }
 
 pub async fn install_xray() -> Result<(), String> {
-    let r = install_from_github("XTLS/Xray-core", r"(?i)^Xray-windows-64\.zip$", "xray.exe", XRAY_NAME, "Xray", r"(?i)\.(dll|dat)$", |t| {
+    let (asset, exe) = if cfg!(windows) { (r"(?i)^Xray-windows-64\.zip$", "xray.exe") } else { (r"(?i)^Xray-linux-64\.zip$", "xray") };
+    let r = install_from_github("XTLS/Xray-core", asset, exe, XRAY_NAME, "Xray", r"(?i)\.(dll|dat)$", |t| {
         app().vpn.lock().unwrap().xray_installing = t.to_string();
         app().push();
     })
@@ -394,6 +424,11 @@ pub async fn install_xray() -> Result<(), String> {
 pub fn set_core_file(file: &str, xray: bool) -> Result<(), String> {
     let dir = core_dir();
     std::fs::copy(file, dir.join(if xray { XRAY_NAME } else { CORE_NAME })).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(dir.join(if xray { XRAY_NAME } else { CORE_NAME }), std::fs::Permissions::from_mode(0o755));
+    }
     let re = if xray { r"(?i)\.(dll|dat)$" } else { r"(?i)\.dll$" };
     let re = regex::Regex::new(re).unwrap();
     if let Ok(rd) = std::fs::read_dir(parent(file)) {
@@ -432,13 +467,75 @@ fn write_system_proxy(enable: bool, server: &str, over: &str) {
     }
     refresh_inet_settings();
 }
+/// Linux: GNOME (and GNOME-based desktops) keep the proxy in gsettings, KDE in kioslaverc.
+/// Saved as { desktop, mode/type, host, port } so it can be restored exactly.
 #[cfg(not(windows))]
 fn read_system_proxy() -> Value {
-    json!(null)
+    use crate::util::linux::{desktop, output};
+    match desktop().as_str() {
+        "kde" => {
+            let kw = if crate::util::linux::which("kreadconfig6").is_some() { "kreadconfig6" } else { "kreadconfig5" };
+            let get = |k: &str| output(kw, &["--file", "kioslaverc", "--group", "Proxy Settings", "--key", k]).unwrap_or_default();
+            json!({ "desktop": "kde", "type": get("ProxyType"), "http": get("httpProxy"), "https": get("httpsProxy"), "socks": get("socksProxy"), "no": get("NoProxyFor") })
+        }
+        "gnome" => {
+            let g = |schema: &str, k: &str| output("gsettings", &["get", schema, k]).unwrap_or_default();
+            json!({ "desktop": "gnome", "mode": g("org.gnome.system.proxy", "mode"), "host": g("org.gnome.system.proxy.http", "host"), "port": g("org.gnome.system.proxy.http", "port"),
+                    "shost": g("org.gnome.system.proxy.https", "host"), "sport": g("org.gnome.system.proxy.https", "port"), "ignore": g("org.gnome.system.proxy", "ignore-hosts") })
+        }
+        _ => json!(null),
+    }
 }
 #[cfg(not(windows))]
-fn write_system_proxy(_e: bool, _s: &str, _o: &str) {
-    refresh_inet_settings();
+fn write_system_proxy(enable: bool, server: &str, _o: &str) {
+    let (host, port) = server.rsplit_once(':').unwrap_or(("127.0.0.1", "2080"));
+    let prev = cfg()["prevProxy"].clone();
+    let restore = !enable && prev.is_object();
+    let sh = |p: &str, a: &[&str]| { let _ = std::process::Command::new(p).args(a).output(); };
+    match crate::util::linux::desktop().as_str() {
+        "kde" => {
+            let kw = if crate::util::linux::which("kwriteconfig6").is_some() { "kwriteconfig6" } else { "kwriteconfig5" };
+            let set = |k: &str, v: &str| sh(kw, &["--file", "kioslaverc", "--group", "Proxy Settings", "--key", k, v]);
+            if enable {
+                let url = format!("http://{} {}", host, port);
+                set("ProxyType", "1");
+                set("httpProxy", &url);
+                set("httpsProxy", &url);
+                set("NoProxyFor", "localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16");
+            } else if restore {
+                for (k, j) in [("ProxyType", "type"), ("httpProxy", "http"), ("httpsProxy", "https"), ("socksProxy", "socks"), ("NoProxyFor", "no")] {
+                    set(k, &s(&prev, j));
+                }
+            } else {
+                set("ProxyType", "0");
+            }
+            sh("dbus-send", &["--type=signal", "/KIO/Scheduler", "org.kde.KIO.Scheduler.reparseSlaveConfiguration", "string:"]);
+        }
+        "gnome" => {
+            let set = |schema: &str, k: &str, v: &str| sh("gsettings", &["set", schema, k, v]);
+            if enable {
+                for sc in ["org.gnome.system.proxy.http", "org.gnome.system.proxy.https"] {
+                    set(sc, "host", host);
+                    set(sc, "port", port);
+                }
+                set("org.gnome.system.proxy", "ignore-hosts", "['localhost', '127.0.0.0/8', '::1', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']");
+                set("org.gnome.system.proxy", "mode", "manual");
+            } else if restore && s(&prev, "desktop") == "gnome" {
+                let unq = |x: String| x.trim_matches('\'').to_string();
+                set("org.gnome.system.proxy.http", "host", &unq(s(&prev, "host")));
+                set("org.gnome.system.proxy.http", "port", &nz(s(&prev, "port"), "0".to_string()));
+                set("org.gnome.system.proxy.https", "host", &unq(s(&prev, "shost")));
+                set("org.gnome.system.proxy.https", "port", &nz(s(&prev, "sport"), "0".to_string()));
+                if !s(&prev, "ignore").is_empty() {
+                    set("org.gnome.system.proxy", "ignore-hosts", &s(&prev, "ignore"));
+                }
+                set("org.gnome.system.proxy", "mode", &nz(unq(s(&prev, "mode")), "none".to_string()));
+            } else {
+                set("org.gnome.system.proxy", "mode", "none");
+            }
+        }
+        _ => {}
+    }
 }
 
 pub fn clear_proxy() {
@@ -447,7 +544,11 @@ pub fn clear_proxy() {
         return;
     }
     let p = &c["prevProxy"];
-    write_system_proxy(p["enable"].as_u64().unwrap_or(0) == 1, &s(p, "server"), &s(p, "override"));
+    if cfg!(windows) {
+        write_system_proxy(p["enable"].as_u64().unwrap_or(0) == 1, &s(p, "server"), &s(p, "override"));
+    } else {
+        write_system_proxy(false, "", "");
+    }
     save_cfg(json!({ "proxySet": false }));
 }
 
@@ -480,6 +581,8 @@ fn kill_xray(v: &mut Vpn) {
     }
     if cfg!(windows) {
         let _ = quiet("taskkill.exe").args(["/F", "/IM", XRAY_NAME]).output();
+    } else {
+        let _ = quiet("pkill").args(["-x", XRAY_NAME]).output();
     }
 }
 
@@ -549,7 +652,16 @@ pub fn start() -> Result<(), String> {
             let re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
             return Err(format!("Ошибка в конфигурации: {}", re.replace_all(t.trim(), "").lines().rev().take(2).collect::<Vec<_>>().join(" ")));
         }
-        if mode == "tun" {
+        if mode == "tun" && !cfg!(windows) {
+            // Linux: TUN needs CAP_NET_ADMIN — granted to the core file once (polkit asks for the password)
+            let caps = crate::util::linux::output("getcap", &[&core]).unwrap_or_default();
+            if !caps.contains("cap_net_admin") {
+                crate::util::linux::pkexec(&format!("setcap cap_net_admin,cap_net_bind_service,cap_net_raw+ep {}", crate::util::linux::sh_quote(&core)))
+                    .map_err(|e| format!("Режим TUN требует прав администратора: {}", e))?;
+            }
+            let ch = quiet(&core).args(["run", "-c"]).arg(&cfg_file).arg("-D").arg(&d).current_dir(core_dir()).spawn().map_err(|e| e.to_string())?;
+            app().vpn.lock().unwrap().child = Some(ch);
+        } else if mode == "tun" {
             run_elevated(
                 &format!(
                     "Stop-Process -Name arcadia-core -Force\nStart-Process -FilePath {} -ArgumentList @('run','-c',{},'-D',{}) -WorkingDirectory {} -WindowStyle Hidden",
@@ -608,7 +720,9 @@ pub fn stop(internal: bool) -> Result<(), String> {
     }
     clear_proxy();
     let mut res = Ok(());
-    if core_running() {
+    if core_running() && !cfg!(windows) {
+        let _ = quiet("pkill").args(["-x", CORE_NAME]).output();
+    } else if core_running() {
         let _ = quiet("taskkill.exe").args(["/F", "/IM", CORE_NAME]).output();
         if !wait_for(false, 1500) {
             res = run_elevated("Stop-Process -Name arcadia-core -Force", true);

@@ -1,6 +1,7 @@
 name: Release
 
-# Push a tag like v2.0.0 → Windows build → GitHub Release with the installer and the portable zip.
+# Push a tag like v2.1.0 (or run it by hand) → Windows and Linux builds → one GitHub Release with
+# the Windows installer + portable zip and the Linux .deb + AppImage.
 # Release text: .github/release-notes/<tag>.md (optional).
 on:
   push:
@@ -8,43 +9,38 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g. v2.0.0)'
+        description: 'Tag to release (e.g. v2.1.0)'
         required: true
 
 permissions:
   contents: write
 
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  # manual run: build the current main; the publish step creates the tag on that commit
+  REF: ${{ github.event_name == 'push' && github.ref || 'main' }}
+
 jobs:
   windows:
     runs-on: windows-latest
-    env:
-      TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
-          # manual run: build the current main; the release step creates the tag on that commit
-          ref: ${{ github.event_name == 'push' && github.ref || 'main' }}
-
+          ref: ${{ env.REF }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-
       - uses: dtolnay/rust-toolchain@stable
-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-
       - name: Install Tauri CLI
         run: npm ci
-
       - name: Tests
         working-directory: src-tauri
         run: cargo test --lib
-
       - name: Build installer
         run: npx tauri build --bundles nsis
-
       - name: Collect files
         shell: pwsh
         run: |
@@ -55,10 +51,64 @@ jobs:
           if (Test-Path src-tauri/target/release/WebView2Loader.dll) { Copy-Item src-tauri/target/release/WebView2Loader.dll portable/ }
           "Arcadia portable`r`nЗапустите Arcadia.exe. Данные хранятся в %APPDATA%\Arcadia" | Set-Content -Encoding utf8 portable/README.txt
           Compress-Archive -Path portable/* -DestinationPath "out/Arcadia-Portable-$v.zip"
-          $notes = ".github/release-notes/$env:TAG.md"
-          if (-not (Test-Path $notes)) { "Arcadia $v" | Set-Content $notes }
-          "NOTES=$notes" >> $env:GITHUB_ENV
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: out/*
 
+  linux:
+    # the oldest supported Ubuntu: the binaries then run on newer distributions too (glibc)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.REF }}
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev patchelf file
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Tauri CLI
+        run: npm ci
+      - name: Tests
+        working-directory: src-tauri
+        run: cargo test --lib
+      - name: Build .deb and AppImage
+        run: npx tauri build --bundles deb,appimage
+      - name: Collect files
+        run: |
+          v="${TAG#v}"
+          mkdir -p out
+          cp src-tauri/target/release/bundle/deb/*.deb "out/arcadia_${v}_amd64.deb"
+          cp src-tauri/target/release/bundle/appimage/*.AppImage "out/Arcadia-${v}-x86_64.AppImage"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: out/*
+
+  publish:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.REF }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Release notes
+        run: |
+          f=".github/release-notes/$TAG.md"
+          [ -f "$f" ] || echo "Arcadia ${TAG#v}" > "$f"
+          echo "NOTES=$f" >> "$GITHUB_ENV"
+          ls -la out
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}

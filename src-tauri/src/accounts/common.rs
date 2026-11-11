@@ -122,10 +122,32 @@ pub async fn fresh_cookies(key: &str, url: &str) -> Result<Cookies, String> {
 /// Tokens are encrypted with Windows DPAPI before going into library.json
 pub fn seal(v: &serde_json::Value) -> String {
     let raw = v.to_string();
+    if !cfg!(windows) {
+        return format!("lx:{}", base64::engine::general_purpose::STANDARD.encode(machine_xor(raw.as_bytes())));
+    }
     match crate::util::winsys::dpapi(raw.as_bytes(), true) {
-        Some(b) if cfg!(windows) => format!("dpapi:{}", base64::engine::general_purpose::STANDARD.encode(b)),
+        Some(b) => format!("dpapi:{}", base64::engine::general_purpose::STANDARD.encode(b)),
         _ => format!("raw:{}", base64::engine::general_purpose::STANDARD.encode(raw)),
     }
+}
+
+/// Linux has no DPAPI: tokens are tied to this machine and user (key from /etc/machine-id + uid),
+/// and the data files are readable only by the user (0600). Copying library.json elsewhere leaves them unreadable.
+fn machine_xor(data: &[u8]) -> Vec<u8> {
+    use sha1::{Digest, Sha1};
+    let id = std::fs::read_to_string("/etc/machine-id").or_else(|_| std::fs::read_to_string("/var/lib/dbus/machine-id")).unwrap_or_default();
+    let seed = format!("arcadia|{}|{}", id.trim(), crate::util::linux::home());
+    let mut out = Vec::with_capacity(data.len());
+    let mut block = 0u64;
+    let mut key: Vec<u8> = vec![];
+    for (i, b) in data.iter().enumerate() {
+        if i % 20 == 0 {
+            key = Sha1::digest(format!("{}|{}", seed, block).as_bytes()).to_vec();
+            block += 1;
+        }
+        out.push(b ^ key[i % 20]);
+    }
+    out
 }
 
 pub fn unseal(s: &str) -> Option<serde_json::Value> {
@@ -134,6 +156,7 @@ pub fn unseal(s: &str) -> Option<serde_json::Value> {
     let raw = match kind {
         "dpapi" => crate::util::winsys::dpapi(&bytes, false)?,
         "raw" => bytes,
+        "lx" => machine_xor(&bytes),
         _ => return None, // "enc:" = Electron's safeStorage, not readable any more — user signs in again
     };
     serde_json::from_slice(&raw).ok()

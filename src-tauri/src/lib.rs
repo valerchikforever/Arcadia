@@ -5,16 +5,26 @@ pub mod browser;
 pub mod commands;
 pub mod discord;
 pub mod extras;
+pub mod fps;
 pub mod installs;
 pub mod launch;
 pub mod meta;
 pub mod net;
+pub mod osd;
 pub mod scanners;
+pub mod sensors;
 pub mod store;
 pub mod tracker;
 pub mod util;
 
 use tauri::Manager;
+
+/// Command-line modes that are not the launcher itself (they must not reach the single-instance check)
+pub fn run_helper_mode() -> Option<i32> {
+    let args: Vec<String> = std::env::args().collect();
+    let i = args.iter().position(|a| a == "--monitor-helper")?;
+    Some(fps::helper_main(&args[i + 1..]))
+}
 
 pub fn run() {
     let hidden = std::env::args().any(|a| a == "--hidden");
@@ -25,9 +35,13 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|_app, _sc, ev| {
+                .with_handler(|_app, sc, ev| {
                     if ev.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                        app::toggle_window();
+                        if sc.id() == osd::HOTKEY_ID.load(std::sync::atomic::Ordering::SeqCst) {
+                            osd::toggle();
+                        } else {
+                            app::toggle_window();
+                        }
                     }
                 })
                 .build(),

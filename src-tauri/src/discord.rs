@@ -4,7 +4,13 @@ use serde_json::{json, Value};
 use std::io::{Read, Write};
 use std::sync::Mutex;
 
-static CONN: Mutex<Option<std::fs::File>> = Mutex::new(None);
+/// Windows: named pipe \\.\pipe\discord-ipc-N; Linux: unix socket $XDG_RUNTIME_DIR/discord-ipc-N
+#[cfg(windows)]
+type Conn = std::fs::File;
+#[cfg(unix)]
+type Conn = std::os::unix::net::UnixStream;
+
+static CONN: Mutex<Option<Conn>> = Mutex::new(None);
 
 fn frame(op: u32, payload: &Value) -> Vec<u8> {
     let body = payload.to_string().into_bytes();
@@ -15,7 +21,7 @@ fn frame(op: u32, payload: &Value) -> Vec<u8> {
     v
 }
 
-fn read_frame(f: &mut std::fs::File) -> Option<Value> {
+fn read_frame(f: &mut Conn) -> Option<Value> {
     let mut h = [0u8; 8];
     f.read_exact(&mut h).ok()?;
     let len = u32::from_le_bytes([h[4], h[5], h[6], h[7]]) as usize;
@@ -24,19 +30,36 @@ fn read_frame(f: &mut std::fs::File) -> Option<Value> {
     serde_json::from_slice(&b).ok()
 }
 
-fn connect(client_id: &str) -> Result<std::fs::File, String> {
-    if !cfg!(windows) {
-        return Err("Только Windows".into());
+fn handshake(mut f: Conn, client_id: &str) -> Result<Conn, String> {
+    f.write_all(&frame(0, &json!({ "v": 1, "client_id": client_id }))).map_err(|e| e.to_string())?;
+    let r = read_frame(&mut f).ok_or("Discord не ответил")?;
+    if r["evt"] == "READY" {
+        return Ok(f);
     }
+    Err(format!("Discord отклонил подключение: {}", r["data"]["message"].as_str().unwrap_or("проверьте Client ID")))
+}
+
+#[cfg(windows)]
+fn connect(client_id: &str) -> Result<Conn, String> {
     for i in 0..10 {
         let path = format!(r"\\.\pipe\discord-ipc-{}", i);
-        if let Ok(mut f) = std::fs::OpenOptions::new().read(true).write(true).open(&path) {
-            f.write_all(&frame(0, &json!({ "v": 1, "client_id": client_id }))).map_err(|e| e.to_string())?;
-            let r = read_frame(&mut f).ok_or("Discord не ответил")?;
-            if r["evt"] == "READY" {
-                return Ok(f);
+        if let Ok(f) = std::fs::OpenOptions::new().read(true).write(true).open(&path) {
+            return handshake(f, client_id);
+        }
+    }
+    Err("Discord не запущен".into())
+}
+
+#[cfg(unix)]
+fn connect(client_id: &str) -> Result<Conn, String> {
+    let run = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
+    // the regular app, Flatpak and Snap builds put the socket in different places
+    for dir in [run.clone(), format!("{}/app/com.discordapp.Discord", run), format!("{}/snap.discord", run), "/tmp".into()] {
+        for i in 0..10 {
+            if let Ok(f) = std::os::unix::net::UnixStream::connect(format!("{}/discord-ipc-{}", dir, i)) {
+                let _ = f.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+                return handshake(f, client_id);
             }
-            return Err(format!("Discord отклонил подключение: {}", r["data"]["message"].as_str().unwrap_or("проверьте Client ID")));
         }
     }
     Err("Discord не запущен".into())

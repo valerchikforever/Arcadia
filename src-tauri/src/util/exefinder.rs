@@ -40,6 +40,48 @@ pub fn is_bad_exe(base: &str) -> bool {
     BAD_EXE.is_match(base)
 }
 
+/// Name without extension if the file is a game executable: a Windows .exe everywhere;
+/// on Linux also native builds (.x86_64, .x86, .sh, .AppImage, extension-less ELF binaries with the exec bit)
+fn exe_base(name: &str, full: &Path) -> Option<String> {
+    let l = name.to_lowercase();
+    if l.ends_with(".exe") {
+        return Some(name[..name.len() - 4].to_string());
+    }
+    if cfg!(windows) {
+        return None;
+    }
+    for ext in [".x86_64", ".x86", ".appimage", ".sh"] {
+        if l.ends_with(ext) {
+            return Some(name[..name.len() - ext.len()].to_string());
+        }
+    }
+    if name.contains('.') {
+        return None; // .so, .pak, .dll, .json …
+    }
+    is_elf_exec(full).then(|| name.to_string())
+}
+
+#[cfg(unix)]
+pub fn is_elf_exec(p: &Path) -> bool {
+    use std::io::Read;
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(m) = fs::metadata(p) else { return false };
+    if m.permissions().mode() & 0o111 == 0 || m.len() < 4096 {
+        return false;
+    }
+    let mut b = [0u8; 4];
+    fs::File::open(p).and_then(|mut f| f.read_exact(&mut b)).is_ok() && b == [0x7f, b'E', b'L', b'F']
+}
+#[cfg(not(unix))]
+pub fn is_elf_exec(_p: &Path) -> bool {
+    false
+}
+
+/// Native Linux executable (not a Windows .exe that needs Wine)
+pub fn is_native(path: &str) -> bool {
+    !cfg!(windows) && !path.to_lowercase().ends_with(".exe")
+}
+
 pub fn list_exes(dir: &str, max_depth: u32) -> Vec<Exe> {
     let mut out = Vec::new();
     let mut budget: i32 = 4000;
@@ -60,8 +102,8 @@ pub fn list_exes(dir: &str, max_depth: u32) -> Vec<Exe> {
                 if depth < max && !SKIP_DIRS.contains(&name.to_lowercase().as_str()) {
                     walk(&full, depth + 1, max, budget, out);
                 }
-            } else if ft.is_file() && name.to_lowercase().ends_with(".exe") {
-                let base = name[..name.len() - 4].to_string();
+            } else if ft.is_file() {
+                let Some(base) = exe_base(&name, &full) else { continue };
                 if BAD_EXE.is_match(&base) {
                     continue;
                 }
@@ -111,6 +153,12 @@ fn score(exe: &Exe, hint: &str) -> f64 {
     }
     if lb.contains("64") || lb.contains("x64") {
         s += 2.0;
+    }
+    if is_native(&exe.path) {
+        s += 5.0; // a native build runs better than the Windows one through Wine
+        if exe.path.to_lowercase().ends_with(".sh") {
+            s += 8.0; // start.sh usually sets up libraries for the real binary
+        }
     }
     s
 }

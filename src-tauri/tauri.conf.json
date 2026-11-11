@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Arcadia",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "identifier": "com.arcadia.launcher",
   "build": {
     "frontendDist": "../ui"
@@ -22,9 +22,15 @@
   "bundle": {
     "active": true,
     "targets": [
-      "nsis"
+      "nsis",
+      "deb",
+      "appimage"
     ],
     "icon": [
+      "icons/32x32.png",
+      "icons/64x64.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
       "icons/icon.png",
       "icons/icon.ico"
     ],
@@ -39,6 +45,21 @@
         ],
         "displayLanguageSelector": false,
         "installerIcon": "icons/icon.ico"
+      }
+    },
+    "category": "Game",
+    "longDescription": "Единая библиотека игр из Steam, Epic, GOG, Heroic, Lutris, других лаунчеров и папок с торрентами: учёт времени, обложки, коллекции, оверлей с FPS и датчиками, zapret и VPN.",
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libayatana-appindicator3-1"
+        ],
+        "section": "games"
+      },
+      "appimage": {
+        "bundleMediaFramework": false
       }
     }
   }

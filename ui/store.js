@@ -69,7 +69,7 @@ function browserFrame(key, a) {
       ${B.loaded ? `<span class="pill" title="Память процесса страницы">${I.cpu}${B.memMB ? `${B.memMB} МБ` : '…'}</span>` : ''}
       ${B.blocked ? `<span class="pill" title="Заблокировано запросов рекламы, трекеров и видео">${I.shield}${B.blocked}</span>` : ''}
       <button class="icon-btn sm" data-sa="external" title="Открыть в обычном браузере">${I.ext}</button>
-      <button class="btn sm${B.full ? ' primary' : ''}" data-sa="full" title="${B.full ? 'Выйти из полноэкранного режима (Esc)' : 'На весь экран (F11)'}">${B.full ? I.shrink : I.expand}${B.full ? 'Свернуть' : 'На весь экран'}</button>
+      ${B.separate ? '' : `<button class="btn sm${B.full ? ' primary' : ''}" data-sa="full" title="${B.full ? 'Выйти из полноэкранного режима (Esc)' : 'На весь экран (F11)'}">${B.full ? I.shrink : I.expand}${B.full ? 'Свернуть' : 'На весь экран'}</button>`}
       <button class="btn sm ghost" data-sa="br-off" title="Выгрузить страницу и выключить браузерный режим">${I.power}Выключить</button>
     </div>` : '';
   let ph;
@@ -83,6 +83,12 @@ function browserFrame(key, a) {
     </div>`;
   } else if (!mine) {
     ph = `<div class="br-ph"><div class="big-ico">${I.globe}</div><h2>${esc(SOURCES[key].label)}</h2><p>Откройте страницу из ссылок выше.</p><div class="row"><button class="btn primary" data-sa="link" data-url="${esc(a.home)}">${I.globe}Открыть магазин</button></div></div>`;
+  } else if (B.separate) {
+    // Linux: the page lives in its own window
+    ph = `<div class="br-ph"><div class="big-ico">${I.ext}</div><h2>${B.loaded ? 'Страница открыта в отдельном окне' : 'Окно магазина закрыто'}</h2>
+      <p>${B.loaded ? esc(B.title || host) : 'Откройте страницу из ссылок выше.'}</p>
+      <div class="row">${B.loaded ? `<button class="btn primary" data-sa="link" data-url="${esc(B.url)}">${I.ext}Показать окно</button>` : `<button class="btn primary" data-sa="link" data-url="${esc(B.url || a.home)}">${I.globe}Открыть снова</button>`}</div>
+      <div class="hint">В Linux страницы магазинов открываются отдельным окном: встроить их в окно Arcadia не даёт WebKitGTK. Окно закрывается кнопкой «Выключить» или само, когда Arcadia уходит в трей.</div></div>`;
   } else {
     ph = `<div class="br-ph"><div class="big-ico">${I.cpu}</div><h2>${B.unloadedReason ? 'Страница выгружена' : 'Загрузка…'}</h2><p>${B.unloadedReason ? 'Память освобождена. Страница загрузится снова, как только раздел будет на экране.' : ''}</p></div>`;
   }
@@ -94,7 +100,8 @@ function renderStore() {
   if (!A) return '<div class="empty"><h2>Загрузка…</h2></div>';
   const key = A[ui.storeKey] ? ui.storeKey : 'steam';
   const a = A[key];
-  const tabs = STORE_ORDER.filter((k) => A[k]).map((k) => {
+  // Linux: EA, Ubisoft, Battle.net and BattleState have no Linux clients — only stores with an account library
+  const tabs = STORE_ORDER.filter((k) => A[k] && (!isLinux() || ['steam', 'epic', 'gog'].includes(k))).map((k) => {
     const signed = A[k].account && (A[k].account.id || A[k].account.web);
     return `<button class="store-tab${k === key ? ' on' : ''}" data-sa="tab" data-key="${k}"><span class="dot" style="--c:${SOURCES[k].color}"></span>${esc(SOURCES[k].label)}${signed ? `<span class="tab-ok">${I.check}</span>` : ''}</button>`;
   }).join('');

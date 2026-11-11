@@ -15,14 +15,26 @@ static RESTORE: Lazy<Mutex<HashMap<String, (Option<bool>, Option<bool>, Option<S
 
 const HIGH_PERF: &str = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
 
+/// Windows: power scheme GUID; Linux: power-profiles-daemon profile ("balanced", "performance", …)
 fn active_power_scheme() -> Option<String> {
+    if !cfg!(windows) {
+        return crate::util::linux::output("powerprofilesctl", &["get"]);
+    }
     let out = quiet("powercfg").arg("/getactivescheme").output().ok()?;
     let t = String::from_utf8_lossy(&out.stdout).to_string();
     regex::Regex::new(r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})").unwrap().captures(&t).map(|c| c[1].to_string())
 }
 
 fn set_power_scheme(guid: &str) {
-    let _ = quiet("powercfg").args(["/setactive", guid]).output();
+    if cfg!(windows) {
+        let _ = quiet("powercfg").args(["/setactive", guid]).output();
+    } else {
+        let _ = std::process::Command::new("powerprofilesctl").args(["set", guid]).output();
+    }
+}
+
+fn high_perf() -> &'static str {
+    if cfg!(windows) { HIGH_PERF } else { "performance" }
 }
 
 fn run_program(p: &Value) {
@@ -30,7 +42,11 @@ fn run_program(p: &Value) {
     if path.is_empty() {
         return;
     }
-    let _ = shell_exec("open", &path, &s(p, "args"), "", true, false);
+    if cfg!(windows) {
+        let _ = shell_exec("open", &path, &s(p, "args"), "", true, false);
+    } else {
+        let _ = crate::launch::run_spec(&serde_json::json!({ "type": "exe", "path": path, "args": s(p, "args") }));
+    }
 }
 
 /// Before the game starts. Errors from zapret/VPN are reported but don't stop the game.
@@ -71,9 +87,9 @@ pub fn before_launch(g: &Value) -> Result<(), String> {
     }
     if a["power"] == true {
         if let Some(cur) = active_power_scheme() {
-            if !cur.eq_ignore_ascii_case(HIGH_PERF) {
+            if !cur.eq_ignore_ascii_case(high_perf()) {
                 rec.2 = Some(cur);
-                set_power_scheme(HIGH_PERF);
+                set_power_scheme(high_perf());
             }
         }
     }

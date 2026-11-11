@@ -2,7 +2,15 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Arcadia UI",
-  "windows": ["main"],
-  "webviews": ["ui"],
-  "permissions": ["core:default"]
+  "windows": [
+    "main",
+    "osd"
+  ],
+  "webviews": [
+    "ui",
+    "osd"
+  ],
+  "permissions": [
+    "core:default"
+  ]
 }

@@ -11,8 +11,18 @@ const SOURCES = {
   ubisoft: { label: 'Ubisoft Connect', color: '#5aa2ff' },
   battlenet: { label: 'Battle.net', color: '#1fbaff' },
   battlestate: { label: 'BattleState', color: '#e0b25c' },
+  amazon: { label: 'Amazon Games', color: '#ff9900' },
+  lutris: { label: 'Lutris', color: '#ffaf28' },
   folder: { label: 'Папки и торренты', short: 'Папка', color: '#7fd18b' },
   manual: { label: 'Добавлены вручную', short: 'Вручную', color: '#f0a6ff' },
+};
+
+const isLinux = () => S.platform === 'linux';
+const OS_NAME = () => (isLinux() ? 'системой' : 'Windows');
+// launchers the scanner looks for, per system (keys of settings.sources / scanStatus)
+const SCANNERS = {
+  win32: [['steam', 'Steam'], ['epic', 'Epic Games'], ['gog', 'GOG Galaxy'], ['ea', 'EA app'], ['ubisoft', 'Ubisoft Connect'], ['battlenet', 'Battle.net'], ['battlestate', 'BattleState']],
+  linux: [['steam', 'Steam'], ['heroic', 'Heroic (Epic, GOG, Amazon)'], ['lutris', 'Lutris']],
 };
 
 let S = { games: {}, collections: [], settings: {}, running: [], scanStatus: {}, scanning: false, metaPending: 0 };
@@ -231,7 +241,7 @@ function continueHtml() {
 function emptyHtml() {
   if (!games().length) {
     return `<div class="empty"><div class="big-ico">${I.sparkle}</div><h2>${S.scanning ? 'Ищем ваши игры…' : 'Библиотека пока пуста'}</h2>
-      <p>Arcadia находит игры из Steam, Epic Games, GOG, EA app, Ubisoft Connect, Battle.net и BattleState. Игры с торрентов и без лаунчера — добавьте папку, где они лежат, или перетащите .exe прямо в окно.</p>
+      <p>${isLinux() ? 'Arcadia находит игры из Steam, Heroic (Epic, GOG, Amazon) и Lutris. Игры с торрентов и без лаунчера — добавьте папку, где они лежат, или перетащите исполняемый файл (.exe, .sh, .x86_64, .desktop) прямо в окно.' : 'Arcadia находит игры из Steam, Epic Games, GOG, EA app, Ubisoft Connect, Battle.net и BattleState. Игры с торрентов и без лаунчера — добавьте папку, где они лежат, или перетащите .exe прямо в окно.'}</p>
       <div class="row"><button class="btn primary" data-act="scan">${I.refresh}Найти игры</button><button class="btn" data-act="settings-folders">${I.folder}Указать папки с играми</button><button class="btn" data-act="add">${I.plus}Добавить вручную</button></div></div>`;
   }
   if (ui.search) return `<div class="empty"><div class="big-ico">${I.search}</div><h2>Ничего не найдено</h2><p>По запросу «${esc(ui.search)}» игр нет.</p></div>`;
@@ -768,7 +778,9 @@ function editModal(id, tab = 'main') {
 
 function settingsModal(tab = 'library') {
   const st = S.settings;
-  const srcRows = Object.entries(SOURCES).filter(([k]) => k !== 'manual').map(([k, v]) => {
+  const scanColor = (k) => (SOURCES[k] || { color: k === 'heroic' ? '#a3a3ff' : '#aaa' }).color;
+  const srcRows = (SCANNERS[S.platform] || SCANNERS.win32).map(([k, label]) => {
+    const v = { label, color: scanColor(k) };
     const s = (S.scanStatus || {})[k] || {};
     const status = s.error ? `<span class="src-status err">ошибка: ${esc(s.error)}</span>` : s.count !== undefined ? `<span class="src-status ${s.count ? 'ok' : ''}">${s.count ? `найдено: ${s.count}` : 'не найдено'}</span>` : '';
     return `<div class="toggle-row"><div><div class="t"><span class="dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${v.color};margin-right:8px"></span>${esc(v.label)}</div><div class="d">${status}</div></div>${switchHtml('sources.' + k, st.sources[k] !== false)}</div>`;
@@ -776,7 +788,7 @@ function settingsModal(tab = 'library') {
   const folders = () => (S.settings.scanFolders || []).map((f, i) => `<div class="folder-item">${I.folder}<span class="p">${esc(f)}</span><button data-rm="${i}" title="Убрать">${I.x}</button></div>`).join('') || '<div class="folder-item" style="color:var(--text-3)">Папки не добавлены</div>';
   const beh = [
     ['closeToTray', 'Сворачивать в трей при закрытии', 'Arcadia продолжит считать время и будет доступна из трея'],
-    ['autostart', 'Запускать вместе с Windows', 'Стартует свёрнутой в трей'],
+    ['autostart', `Запускать вместе с ${OS_NAME()}`, 'Стартует свёрнутой в трей'],
     ['startMinimized', 'Всегда запускать свёрнутой', ''],
     ['minimizeOnLaunch', 'Сворачивать окно при запуске игры', ''],
     ['trackExternal', 'Учитывать игры, запущенные не через Arcadia', 'Время засчитается, даже если игра запущена из Steam или ярлыка'],
@@ -785,13 +797,13 @@ function settingsModal(tab = 'library') {
     ['syncAccountsOnStart', 'Обновлять списки купленных игр', 'Не чаще раза в 12 часов, через 15 секунд после запуска'],
   ].map(([k, t, d]) => `<div class="toggle-row"><div><div class="t">${t}</div>${d ? `<div class="d">${d}</div>` : ''}</div>${switchHtml(k, !!st[k])}</div>`).join('');
   const body = `
-    <div class="tabs"><button data-tab="library">Библиотека</button><button data-tab="art">Обложки</button><button data-tab="behavior">Поведение</button><button data-tab="browser">Браузер</button><button data-tab="integrations">Интеграции</button><button data-tab="notify">Уведомления</button><button data-tab="about">Данные</button></div>
+    <div class="tabs"><button data-tab="library">Библиотека</button><button data-tab="art">Обложки</button><button data-tab="behavior">Поведение</button><button data-tab="browser">Браузер</button><button data-tab="integrations">Интеграции</button><button data-tab="notify">Уведомления</button>${isLinux() ? '<button data-tab="linux">Linux</button>' : ''}<button data-tab="about">Данные</button></div>
     <div class="body">
       <div data-pane="library">
         <div class="field"><label>Папки с играми без лаунчера (торренты, репаки, портативные)</label>
           <div class="folder-list" id="fList">${folders()}</div>
           <button class="btn" id="fAdd">${I.plus}Добавить папку</button>
-          <div class="hint">Каждая подпапка считается отдельной игрой, Arcadia сама найдёт нужный .exe и очистит название от тегов вроде [FitGirl Repack] или v1.2.3. Если exe определился неверно — поправьте его в «Изменить».</div></div>
+          <div class="hint">Каждая подпапка считается отдельной игрой, Arcadia сама найдёт нужный ${isLinux() ? 'исполняемый файл (родной для Linux или .exe — он запустится через Wine/Proton)' : '.exe'} и очистит название от тегов вроде [FitGirl Repack] или v1.2.3. Если exe определился неверно — поправьте его в «Изменить».</div></div>
         <div class="field"><label>Лаунчеры</label>${srcRows}<div class="toggle-row"><div><div class="t"><span class="dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${SOURCES.folder.color};margin-right:8px"></span>Сканировать папки из списка выше</div></div>${switchHtml('sources.folder', st.sources.folder !== false)}</div></div>
       </div>
       <div data-pane="art" class="hidden">
@@ -816,6 +828,7 @@ function settingsModal(tab = 'library') {
       </div>
       <div data-pane="integrations" class="hidden">${integrationsPaneHtml()}</div>
       <div data-pane="notify" class="hidden">${notifyPaneHtml()}</div>
+      ${isLinux() ? `<div data-pane="linux" class="hidden">${linuxPaneHtml()}</div>` : ''}
       <div data-pane="about" class="hidden">
         <div class="toggle-row"><div><div class="t">Папка с данными</div><div class="d">Библиотека, обложки и журнал работы</div></div><button class="btn" id="openData">${I.folder}Открыть</button></div>
         <div class="toggle-row"><div><div class="t">Вернуть удалённые игры</div><div class="d">Удалённых из библиотеки: ${(st.ignoredIds || []).length}. Они снова появятся после сканирования.</div></div><button class="btn" id="unignore" ${(st.ignoredIds || []).length ? '' : 'disabled'}>Вернуть</button></div>
@@ -866,6 +879,10 @@ function settingsModal(tab = 'library') {
   $('#unignore', el).onclick = () => { api.unignore(); toast('Удалённые игры вернутся после сканирования', 'ok'); };
   $('#quit', el).onclick = () => api.quit();
   bindSettingsExtras(el);
+  // Linux tab
+  const lxSet = (patch) => { S.settings.linux = { ...(S.settings.linux || {}), ...patch }; api.setSettings({ linux: patch }); const p = $('[data-pane="linux"]', el); if (p) p.innerHTML = linuxPaneHtml(); };
+  el.addEventListener('click', (e) => { const b = e.target.closest('[data-lx]'); if (b) lxSet({ [b.dataset.lx]: b.dataset.v }); });
+  el.addEventListener('change', (e) => { const i = e.target.closest('[data-lx-input]'); if (i) lxSet({ [i.dataset.lxInput]: i.value.trim() }); });
   const hk = $('#hk', el);
   hk.onkeydown = async (e) => {
     e.preventDefault();
@@ -970,6 +987,11 @@ function bind() {
       if (a === 'mon-start') { const r = await api.x('monitor-start'); if (r && r.ok === false) toast(r.error, 'err'); else monPoll(true); return; }
       if (a === 'mon-stop') { await api.x('monitor-stop'); ui.mon.data = null; return; }
       if (a === 'mon-folder') return api.x('monitor-folder');
+      if (a === 'osd-toggle') { const r = await api.x('osd-toggle'); if (r && S.extras) { S.extras.osd = { ...(S.extras.osd || {}), visible: r.visible }; ui.lastHtml = ''; render(); } return; }
+      if (a === 'osd-set') return setOsd({ [actEl.dataset.k]: actEl.dataset.v });
+      if (a === 'osd-item') { const it = osdCfg().items; const v = actEl.dataset.v; return setOsd({ items: it.includes(v) ? it.filter((x) => x !== v) : OSD_ITEMS.map(([k]) => k).filter((k) => it.includes(k) || k === v) }); }
+      if (a === 'osd-hk-clear') return setOsd({ hotkey: '' });
+      if (a === 'mangohud-copy') { const r = await api.x('mangohud-config'); if (r && r.config) { try { await navigator.clipboard.writeText('MANGOHUD_CONFIG=' + r.config); toast('Скопировано: строка MANGOHUD_CONFIG', 'ok'); } catch { promptModal('Настройки MangoHud', 'MANGOHUD_CONFIG=' + r.config); } } return; }
       if (a === 'fav') return toggleFav(id);
       if (a === 'back') return closeDetail();
       if (a === 'edit') return editModal(id);
@@ -997,9 +1019,20 @@ function bind() {
     }
     if (card && !ui.detail) openDetail(id);
   });
-  view.addEventListener('change', (e) => {
+  view.addEventListener('change', async (e) => {
     const s = e.target.closest('[data-act-change="status"]');
-    if (s && ui.detail) patchGame(ui.detail, { status: s.value });
+    if (s && ui.detail) return patchGame(ui.detail, { status: s.value });
+    const t = e.target;
+    // overlay switches on the Monitor page
+    if (t.dataset.key && t.dataset.key.startsWith('osd.')) return setOsd({ [t.dataset.key.slice(4)]: t.checked });
+    if (t.dataset.osdChange) return setOsd({ [t.dataset.osdChange]: Number(t.value) });
+    if (t.dataset.actChange === 'mon-task') {
+      const want = t.checked;
+      toast(want ? 'Подтвердите права администратора — это нужно один раз' : 'Удаляем задачу…', 'ok');
+      const r = await api.x('monitor-task', want);
+      if (r && r.ok === false) { toast(r.error, 'err'); t.checked = !want; }
+      else toast(want ? 'Готово: датчики будут запускаться без запроса UAC' : 'Задача удалена', 'ok');
+    }
   });
   view.addEventListener('dblclick', (e) => {
     const card = e.target.closest('.card, .lrow');

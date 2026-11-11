@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost">
+  <title>Arcadia OSD</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: transparent !important; overflow: hidden; height: 100%; user-select: none; cursor: default; }
+    body { font: 600 15px/1.25 "Segoe UI", "Inter", system-ui, sans-serif; color: #fff; font-variant-numeric: tabular-nums; }
+    #box { position: absolute; padding: 8px 12px 9px; border-radius: 10px; background: rgba(8, 6, 12, var(--a, .55)); min-width: 150px;
+      text-shadow: 0 1px 2px rgba(0,0,0,.9); transform-origin: top left; }
+    body.tr #box { right: 0; top: 0; transform-origin: top right; }
+    body.tl #box { left: 0; top: 0; }
+    body.bl #box { left: 0; bottom: 0; transform-origin: bottom left; }
+    body.br #box { right: 0; bottom: 0; transform-origin: bottom right; }
+    .row { display: grid; grid-template-columns: 48px auto; gap: 10px; align-items: baseline; white-space: nowrap; }
+    .k { font-size: 11px; letter-spacing: .6px; color: var(--c, #aab); text-transform: uppercase; }
+    .v b { font-size: 17px; }
+    .v i { font-style: normal; font-size: 11px; color: #ccd; margin-left: 2px; }
+    .v .sep { color: #889; margin: 0 5px; }
+    .fps .v b { font-size: 24px; color: #6ee7b7; }
+    .fps .v b.mid { color: #fde68a; }
+    .fps .v b.low { color: #fca5a5; }
+    .hot { color: #fca5a5; }
+    .note { font-size: 11px; color: #ccd; font-weight: 500; max-width: 230px; white-space: normal; }
+    .game { font-size: 11px; color: #ccd; max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 3px; font-weight: 500; }
+  </style>
+</head>
+<body class="tl">
+  <div id="box"></div>
+  <script src="osd.js"></script>
+</body>
+</html>

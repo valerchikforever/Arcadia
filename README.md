@@ -1,6 +1,6 @@
 # Arcadia — единый лаунчер для всех игр
 
-Собирает игры со всех лаунчеров и папок в одну библиотеку с обложками, коллекциями и учётом времени.
+Собирает игры со всех лаунчеров и папок в одну библиотеку с обложками, коллекциями и учётом времени. Работает в **Windows 10/11** и **Linux** (с версии 2.1).
 
 С версии 2.0 Arcadia написана на **Rust + Tauri** вместо Electron: интерфейс рисует системный WebView2 (он уже есть в Windows 10/11), а не встроенный Chromium. Программа весит ~8 МБ вместо ~90 МБ, в простое занимает примерно в 3–4 раза меньше памяти и запускается быстрее. Библиотека, настройки и обложки из 1.x подхватываются как есть; заново нужно только войти в аккаунты Epic/GOG (ключи теперь шифруются иначе).
 
@@ -56,7 +56,11 @@
 
 **Загрузки торрентов** — через веб-интерфейс qBittorrent («Настройки → Интеграции»): прогресс, скорость и оставшееся время в разделе «Загрузки». Если торрент сохраняется в папку из «Настройки → Библиотека», после загрузки игра сама появляется в библиотеке.
 
-**Мониторинг железа (отдельный модуль)** — раздел «Мониторинг»: модуль на основе LibreHardwareMonitor скачивается по кнопке (~5 МБ) в `%APPDATA%\Arcadia\modules\monitor`. Температуры, загрузка, частоты, мощность и вентиляторы процессора, видеокарты, памяти и дисков с графиками. Запуск датчиков спрашивает права администратора. Пока раздел закрыт, данные не опрашиваются. Счётчик FPS в играх в модуль пока не входит.
+**Мониторинг железа и оверлей в игре** — раздел «Мониторинг».
+- Windows: модуль скачивается по кнопке (~8 МБ) в `%APPDATA%\Arcadia\modules\monitor` — LibreHardwareMonitor (датчики) и PresentMon от Intel (FPS). Температуры, загрузка, частоты, мощность и вентиляторы процессора, видеокарты, памяти и дисков с графиками. Запуск датчиков один раз спрашивает права администратора; переключатель «Без запроса UAC» создаёт задачу в планировщике Windows, и дальше датчики включаются без окна UAC (в том числе сами при запуске игры).
+- Linux: датчики читаются напрямую из системы (hwmon, amdgpu, nvidia-smi, /proc) — ставить ничего не нужно, прав администратора тоже.
+- **Оверлей в игре**: прозрачная панель поверх игры — FPS, время кадра, 1% low, загрузка и температура CPU/GPU, видеопамять, память, время сессии, часы. Состав, угол экрана, размер и прозрачность настраиваются; показывается сам при запуске игры и прячется после выхода, переключается горячей клавишей (по умолчанию Shift+F12). В игру ничего не внедряется (FPS считается по событиям Windows через PresentMon), поэтому оверлей безопасен с античитами — BattlEye, EAC, Vanguard. Виден в оконном режиме и в «полноэкранном без рамки» (так работают почти все современные игры); в эксклюзивном полноэкранном режиме игра его перекрывает — переключите её на «без рамки».
+- В Linux показатели прямо внутри игры рисует **MangoHud** (Vulkan, OpenGL, DXVK/VKD3D под Wine/Proton) — для игр, которые запускает Arcadia, включается одним переключателем с теми же настройками. Для игр Steam добавьте в параметры запуска `mangohud %command%`, в Heroic и Lutris есть свой переключатель MangoHud.
 
 **Трей и автозапуск** — сворачивание в трей при закрытии, недавние/избранные игры в меню трея, запуск вместе с Windows (свёрнутым), глобальная горячая клавиша (по умолчанию Ctrl+Alt+G), сворачивание окна при запуске игры.
 
@@ -113,10 +117,25 @@
 Не поддерживаются подписки в формате Clash/YAML.
 Журнал VPN: `%APPDATA%\Arcadia\vpn\core.log`.
 
-## Установка
+## Linux
 
-- `Arcadia-Setup-2.0.0.exe` — установщик (ставится для текущего пользователя, без прав администратора; ярлыки в меню «Пуск» и на рабочем столе, удаление через «Приложения»).
-- `Arcadia-Portable-2.0.0.zip` — портативная версия: распакуйте в любую папку и запустите `Arcadia.exe` (рядом должен лежать `WebView2Loader.dll`). Данные всё равно хранятся в `%APPDATA%\Arcadia`.
+Что работает так же, как в Windows: библиотека и учёт времени, обложки, коллекции, статусы, профили запуска, HowLongToBeat, Discord-статус, уведомления, qBittorrent, VPN, мониторинг и оверлей, режим для геймпада.
+
+- **Источники**: Steam (обычный, Flatpak, Snap), Heroic Games Launcher (Epic, GOG, Amazon — с временем игры из Heroic), Lutris, папки с играми. В папках находятся и родные для Linux игры (`.x86_64`, `.sh`, AppImage, исполняемые файлы), и Windows-игры (`.exe`).
+- **Windows-игры с торрентов** запускаются через Wine, Proton (umu-run) или свою команду (например, `gamescope -f -- wine`) — «Настройки → Linux», там же префикс Wine. Время считается и для игр под Wine/Proton.
+- **Купленные игры** Epic и GOG ставятся через Heroic (кнопка «Установить» открывает его).
+- **VPN**: Arcadia скачивает ядра sing-box и Xray для Linux; системный прокси выставляется в GNOME и KDE. Для режима TUN один раз спрашивается пароль — ядру выдаётся право управлять сетью (`setcap`).
+- **Zapret**: используется [zapret от bol-van](https://github.com/bol-van/zapret), установленный как служба (`sudo ./install_easy.sh` → `/opt/zapret`); Arcadia включает и выключает её (пароль через polkit). Стратегия задаётся в `/opt/zapret/config`, подбирается `blockcheck.sh`.
+- **Схема питания** перед игрой — power-profiles-daemon («performance»).
+- **Страницы магазинов** открываются отдельным окном (встроить их в окно Arcadia WebKitGTK не позволяет).
+- Глобальные горячие клавиши работают в X11; в Wayland — зависит от окружения.
+
+Установка: `sudo apt install ./arcadia_2.1.0_amd64.deb` (Debian, Ubuntu, Mint) или `Arcadia-2.1.0-x86_64.AppImage` — сделайте файл исполняемым и запустите (любой дистрибутив). Нужны WebKitGTK 4.1 и GTK 3 — они есть в любом современном дистрибутиве. Данные хранятся в `~/.config/Arcadia`.
+
+## Установка (Windows)
+
+- `Arcadia-Setup-2.1.0.exe` — установщик (ставится для текущего пользователя, без прав администратора; ярлыки в меню «Пуск» и на рабочем столе, удаление через «Приложения»).
+- `Arcadia-Portable-2.1.0.zip` — портативная версия: распакуйте в любую папку и запустите `Arcadia.exe`. Данные всё равно хранятся в `%APPDATA%\Arcadia`.
 
 Нужен WebView2 Runtime — он встроен в Windows 11 и обновлённую Windows 10; если его нет, установщик скачает его сам. Windows SmartScreen может предупредить, что приложение без цифровой подписи — «Подробнее» → «Выполнить в любом случае».
 
@@ -130,12 +149,14 @@ npm install
 npm run dev          # запуск с отладкой
 npm run build        # установщик в src-tauri\target\release\bundle\nsis
 ```
-Из Linux (кросс-сборка через mingw): `./build-windows.sh` → `dist/Arcadia-Setup-*.exe` и `dist/Arcadia-Portable-*.zip`.
+На Linux нужны ещё `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev`; `npx tauri build --bundles deb,appimage` → `.deb` и AppImage в `src-tauri/target/release/bundle`.
+Из Linux для Windows (кросс-сборка через mingw): `./build-windows.sh` → `dist/Arcadia-Setup-*.exe` и `dist/Arcadia-Portable-*.zip`.
+Выпуски собирает GitHub Actions (`.github/workflows/release.yml`): метка `v*` → сборки для Windows и Linux и страница выпуска с файлами.
 Тесты: `cd src-tauri && cargo test`.
 
 ## Где хранятся данные
 
-`%APPDATA%\Arcadia\` — `library.json` (библиотека, время, коллекции, настройки; рядом резервная копия `.bak`), `media\` (обложки), `web\` (вход на сайтах магазинов), `vpn\`, `modules\` (модуль мониторинга), `arcadia.log` (журнал).
+`%APPDATA%\Arcadia\` (Linux: `~/.config/Arcadia/`) — `library.json` (библиотека, время, коллекции, настройки; рядом резервная копия `.bak`), `media\` (обложки), `web\` (вход на сайтах магазинов), `vpn\`, `modules\` (модуль мониторинга), `arcadia.log` (журнал).
 
 ## Структура
 
@@ -143,15 +164,19 @@ npm run build        # установщик в src-tauri\target\release\bundle\n
 src-tauri/src/lib.rs          запуск, плагины, трей
 src-tauri/src/app.rs          окно, состояние, фоновые циклы (учёт времени, загрузки, сеть)
 src-tauri/src/commands.rs     все команды интерфейса
-src-tauri/src/scanners/       steam, epic, registry (GOG/EA/Ubisoft/Battle.net/BattleState), folders, manual, gog_time
+src-tauri/src/scanners/       steam, epic, registry (GOG/EA/Ubisoft/Battle.net/BattleState), linux (Heroic, Lutris), folders, manual, gog_time
 src-tauri/src/accounts/       steam, epic, gog — вход и купленные игры
 src-tauri/src/net/            zapret, vpn (sing-box + Xray), links (разбор ссылок)
 src-tauri/src/browser.rs      встроенный браузер магазинов с выгрузкой страниц
 src-tauri/src/actions.rs      действия перед запуском, уведомления, расписания
 src-tauri/src/extras.rs       HowLongToBeat, автоподбор zapret, новости магазинов, qBittorrent, мониторинг
 src-tauri/src/discord.rs      статус Discord
+src-tauri/src/sensors.rs      датчики (LHM в Windows, sysfs/proc/nvidia-smi в Linux)
+src-tauri/src/fps.rs          FPS через PresentMon: помощник с правами администратора
+src-tauri/src/osd.rs          оверлей в игре, MangoHud
+src-tauri/src/util/linux.rs   Linux: папки XDG, Wine-пути, pkexec
 src-tauri/src/meta.rs, tracker.rs, installs.rs, launch.rs, store.rs
-ui/                           интерфейс (app.js, features.js, net.js, store.js, styles.css)
+ui/                           интерфейс (app.js, features.js, net.js, store.js, styles.css; osd.html — оверлей)
 ```
 
 ## Ограничения
@@ -161,6 +186,8 @@ ui/                           интерфейс (app.js, features.js, net.js, s
 - Discord-статус требует своё приложение в Discord Developer Portal (одна минута, см. выше).
 - Часть датчиков (процессор, материнская плата) LibreHardwareMonitor видит только с правами администратора.
 - Встроенный браузер магазинов на Tauri — дочернее окно WebView2; если страница встанет не на своё место после смены масштаба Windows, переключите раздел.
+- Оверлей Arcadia не виден в играх в эксклюзивном полноэкранном режиме (в Windows) и поверх полноэкранных игр в Linux — там его роль выполняет MangoHud.
+- FPS в Windows считает PresentMon: нужен модуль мониторинга и запущенные датчики. Без модуля оверлей показывает загрузку процессора, память и видеокарту NVIDIA.
 
 ## Если игра не нашлась или запускается не тот exe
 

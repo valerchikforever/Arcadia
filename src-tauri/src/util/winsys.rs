@@ -70,12 +70,45 @@ pub fn read_registry(_keys: &[&str]) -> RegSnapshot {
     RegSnapshot::new()
 }
 
-/// Full paths of running process executables
+/// Full paths of running process executables.
+/// Linux: a Windows game under Wine/Proton runs as wine64-preloader, so the game's own path is taken
+/// from its command line ("Z:\home\…\game.exe" -> "/home/…/game.exe").
 pub fn process_paths() -> Vec<String> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
     let mut sys = System::new();
-    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing().with_exe(UpdateKind::Always));
-    sys.processes().values().filter_map(|p| p.exe().map(|e| e.to_string_lossy().to_string())).collect()
+    #[allow(unused_mut)]
+    let mut kind = ProcessRefreshKind::nothing().with_exe(UpdateKind::Always);
+    #[cfg(not(windows))]
+    {
+        kind = kind.with_cmd(UpdateKind::Always).with_environ(UpdateKind::OnlyIfNotSet);
+    }
+    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, kind);
+    let mut out = vec![];
+    for p in sys.processes().values() {
+        if let Some(e) = p.exe() {
+            out.push(e.to_string_lossy().to_string());
+        }
+        #[cfg(not(windows))]
+        {
+            let cmd = p.cmd();
+            let Some(first) = cmd.first().map(|c| c.to_string_lossy().to_string()) else { continue };
+            if first.contains(":\\") || first.contains(":/") {
+                let env = |k: &str| p.environ().iter().find_map(|e| e.to_string_lossy().strip_prefix(&format!("{}=", k)).map(String::from));
+                let prefix = env("WINEPREFIX").or_else(|| env("STEAM_COMPAT_DATA_PATH").map(|d| format!("{}/pfx", d)));
+                if let Some(u) = super::linux::wine_to_unix(&first, prefix.as_deref()) {
+                    out.push(u);
+                }
+            } else if first.starts_with('/') && p.exe().map(|e| e.to_string_lossy() != first).unwrap_or(true) {
+                out.push(first); // scripts: the interpreter is the exe, the script is argv[0]/argv[1]
+            }
+            if let Some(second) = cmd.get(1).map(|c| c.to_string_lossy().to_string()) {
+                if second.starts_with('/') && (second.ends_with(".sh") || second.ends_with(".x86_64") || second.ends_with(".exe")) {
+                    out.push(second);
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Lower-cased names of running processes

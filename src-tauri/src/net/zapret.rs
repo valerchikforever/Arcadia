@@ -1,5 +1,7 @@
-//! zapret (winws.exe): finds the zapret folder, lists strategy .bat files,
+//! zapret. Windows (winws.exe): finds the zapret folder, lists strategy .bat files,
 //! runs the chosen one hidden with admin rights and reports whether it runs.
+//! Linux (nfqws): zapret by bol-van installed with install_easy.sh (/opt/zapret) runs as a system service;
+//! Arcadia starts/stops that service through polkit. The strategy lives in /opt/zapret/config (blockcheck.sh picks it).
 use crate::util::common::{exists, is_dir, join, parent};
 use crate::util::winsys::{process_names, ps_quote, run_elevated};
 use once_cell::sync::Lazy;
@@ -23,9 +25,20 @@ fn read_text(p: &Path) -> String {
     fs::read(p).map(|b| String::from_utf8_lossy(&b).to_string()).unwrap_or_default()
 }
 
+/// Linux: the service script of a bol-van zapret install
+fn linux_service(dir: &str) -> Option<String> {
+    let p = join(dir, "init.d/sysv/zapret");
+    exists(&p).then_some(p)
+}
+
+pub const LINUX_STRATEGY: &str = "Служба zapret";
+
 pub fn looks_like_zapret(dir: &str) -> bool {
     if !is_dir(dir) {
         return false;
+    }
+    if !cfg!(windows) {
+        return linux_service(dir).is_some() || exists(&join(dir, "nfq/nfqws"));
     }
     if find_winws(dir).is_some() {
         return true;
@@ -37,6 +50,10 @@ pub fn looks_like_zapret(dir: &str) -> bool {
 
 /// Looks for zapret folders on the Desktop, in Downloads, Documents and disk roots
 pub fn detect_dirs() -> Vec<String> {
+    if !cfg!(windows) {
+        let h = crate::util::linux::home();
+        return ["/opt/zapret".to_string(), format!("{}/zapret", h), format!("{}/Downloads/zapret", h)].into_iter().filter(|d| looks_like_zapret(d)).collect();
+    }
     let home = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).unwrap_or_default();
     let mut roots: Vec<String> = ["", "Desktop", "Downloads", "Documents", "OneDrive/Desktop", "OneDrive/Рабочий стол"]
         .iter()
@@ -75,6 +92,9 @@ pub fn detect_dirs() -> Vec<String> {
 }
 
 pub fn list_strategies(dir: &str) -> Vec<String> {
+    if !cfg!(windows) {
+        return if looks_like_zapret(dir) { vec![LINUX_STRATEGY.to_string()] } else { vec![] };
+    }
     let Ok(rd) = fs::read_dir(dir) else { return vec![] };
     let mut out: Vec<String> = rd
         .flatten()
@@ -187,7 +207,10 @@ pub struct Zapret {
 }
 
 pub fn state(cfg: &Value, z: &Zapret) -> Value {
-    let dir = cfg["dir"].as_str().unwrap_or("").to_string();
+    let mut dir = cfg["dir"].as_str().unwrap_or("").to_string();
+    if dir.is_empty() && !cfg!(windows) && looks_like_zapret("/opt/zapret") {
+        dir = "/opt/zapret".into();
+    }
     let strategies = if dir.is_empty() { vec![] } else { list_strategies(&dir) };
     let cur = cfg["strategy"].as_str().unwrap_or("").to_string();
     let strategy = if strategies.contains(&cur) { cur } else { strategies.first().cloned().unwrap_or_default() };
@@ -195,12 +218,13 @@ pub fn state(cfg: &Value, z: &Zapret) -> Value {
         "dir": dir, "valid": !dir.is_empty() && looks_like_zapret(&dir), "strategies": strategies, "strategy": strategy,
         "running": z.running, "runningStrategy": if z.running { cfg["lastStarted"].clone() } else { json!("") },
         "busy": z.busy, "error": z.error, "gameFilter": cfg["gameFilter"] == true, "autostart": cfg["autostart"] == true,
-        "stopOnExit": cfg["stopOnExit"] == true,
+        "stopOnExit": cfg["stopOnExit"] == true, "linux": !cfg!(windows),
     })
 }
 
 pub fn is_running() -> bool {
-    process_names().contains("winws.exe")
+    let p = process_names();
+    if cfg!(windows) { p.contains("winws.exe") } else { p.contains("nfqws") || p.contains("tpws") }
 }
 
 pub fn wait_for(want: bool, ms: u64) -> bool {
@@ -216,6 +240,14 @@ pub fn wait_for(want: bool, ms: u64) -> bool {
 
 /// Blocking: starts a strategy with admin rights
 pub fn start(dir: &str, strategy: &str, game_filter: bool) -> Result<(), String> {
+    if !cfg!(windows) {
+        let svc = linux_service(dir).ok_or("Не найден скрипт службы init.d/sysv/zapret — установите zapret через install_easy.sh")?;
+        crate::util::linux::pkexec(&format!("systemctl start zapret 2>/dev/null || {} start", crate::util::linux::sh_quote(&svc)))?;
+        if !wait_for(true, 9000) {
+            return Err("nfqws не запустился. Проверьте настройки в /opt/zapret/config (подберите стратегию: sudo /opt/zapret/blockcheck.sh)".into());
+        }
+        return Ok(());
+    }
     let file = join(dir, strategy);
     let script = match parse_bat(&file, game_filter) {
         Ok((exe, args, cwd)) => {
@@ -239,15 +271,38 @@ pub fn start(dir: &str, strategy: &str, game_filter: bool) -> Result<(), String>
 }
 
 pub fn stop() -> Result<(), String> {
+    if !cfg!(windows) {
+        let dir = crate::app::try_app().map(|a| s_dir(&a.store.lock().unwrap().settings["zapret"])).unwrap_or_default();
+        let svc = linux_service(if dir.is_empty() { "/opt/zapret" } else { &dir }).unwrap_or_else(|| "/opt/zapret/init.d/sysv/zapret".into());
+        crate::util::linux::pkexec(&format!("systemctl stop zapret 2>/dev/null || {} stop", crate::util::linux::sh_quote(&svc)))?;
+        wait_for(false, 4000);
+        return Ok(());
+    }
     run_elevated("Stop-Process -Name winws -Force\nforeach($s in 'WinDivert','WinDivert14'){ sc.exe stop $s | Out-Null; sc.exe delete $s | Out-Null }", true)?;
     wait_for(false, 4000);
     Ok(())
+}
+
+fn s_dir(z: &Value) -> String {
+    z["dir"].as_str().unwrap_or("").to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
+    #[cfg(not(windows))]
+    fn linux_install() {
+        let t = tempfile::tempdir().unwrap();
+        let d = t.path().to_string_lossy().to_string();
+        assert!(!looks_like_zapret(&d));
+        fs::create_dir_all(t.path().join("init.d/sysv")).unwrap();
+        fs::write(t.path().join("init.d/sysv/zapret"), "#!/bin/sh").unwrap();
+        assert!(looks_like_zapret(&d));
+        assert_eq!(list_strategies(&d), vec![LINUX_STRATEGY]);
+    }
+    #[test]
+    #[cfg(windows)]
     fn strategies_and_bat() {
         let t = tempfile::tempdir().unwrap();
         let d = t.path();

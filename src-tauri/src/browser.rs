@@ -59,7 +59,7 @@ pub fn state() -> Value {
     json!({
         "enabled": b.enabled, "loaded": b.loaded, "key": b.key, "url": b.url, "title": b.title, "loading": b.loading,
         "canBack": b.loaded, "canFwd": b.loaded, "full": b.full, "memMB": b.mem_mb, "blocked": BLOCKED.load(Ordering::Relaxed),
-        "unloadedReason": b.unloaded_reason,
+        "unloadedReason": b.unloaded_reason, "separate": SEPARATE_WINDOW,
     })
 }
 
@@ -121,14 +121,10 @@ fn page_pid(_wv: &Webview) -> Option<u32> {
     None
 }
 
-fn create_view(key: &str, url: &str) -> Result<(), String> {
-    let win = app().handle.get_window("main").ok_or("нет окна")?;
-    let u: url::Url = url.parse().map_err(|_| "Неверный адрес")?;
-    let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(u))
-        .data_directory(profile_dir(key))
-        .additional_browser_args(&browser_args())
-        .user_agent(UA)
-        .on_navigation(|u| {
+/// Navigation / new-tab / load / title handlers, the same for the embedded view (Windows) and the separate window (Linux)
+macro_rules! with_handlers {
+    ($b:expr) => {
+        $b.on_navigation(|u| {
             let s = u.as_str();
             if s.starts_with("http://") || s.starts_with("https://") || s.starts_with("about:") || s.starts_with("data:") || s.starts_with("blob:") {
                 return true;
@@ -160,7 +156,41 @@ fn create_view(key: &str, url: &str) -> Result<(), String> {
         .on_document_title_changed(|_w, t| {
             app().browser.lock().unwrap().title = t;
             app().push();
+        })
+    };
+}
+
+/// Linux: WebKitGTK can't overlay a second view inside the window (it would squash the interface),
+/// so the store page gets a window of its own
+pub const SEPARATE_WINDOW: bool = cfg!(not(windows));
+
+fn create_view(key: &str, url: &str) -> Result<(), String> {
+    let u: url::Url = url.parse().map_err(|_| "Неверный адрес")?;
+    if SEPARATE_WINDOW {
+        let b = tauri::WebviewWindowBuilder::new(&app().handle, LABEL, WebviewUrl::External(u))
+            .title("Arcadia — магазин")
+            .inner_size(1240.0, 820.0)
+            .data_directory(profile_dir(key))
+            .user_agent(UA);
+        let w = with_handlers!(b).build().map_err(|e| e.to_string())?;
+        if let Some(icon) = app().handle.default_window_icon() {
+            let _ = w.set_icon(icon.clone());
+        }
+        w.on_window_event(|e| {
+            if let tauri::WindowEvent::CloseRequested { .. } = e {
+                let mut b = app().browser.lock().unwrap();
+                b.loaded = false;
+                b.loading = false;
+                b.unloaded_reason = "closed".into();
+                drop(b);
+                app().push();
+            }
         });
+        return Ok(());
+    }
+    let win = app().handle.get_window("main").ok_or("нет окна")?;
+    let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(u)).data_directory(profile_dir(key)).additional_browser_args(&browser_args()).user_agent(UA);
+    let builder = with_handlers!(builder);
     let (x, y, w, h) = app().browser.lock().unwrap().bounds.unwrap_or((0.0, 0.0, 10.0, 10.0));
     let wv = win.add_child(builder, LogicalPosition::new(x, y), LogicalSize::new(w.max(1.0), h.max(1.0))).map_err(|e| e.to_string())?;
     install_blocker(&wv);
@@ -169,6 +199,9 @@ fn create_view(key: &str, url: &str) -> Result<(), String> {
 }
 
 fn apply() {
+    if SEPARATE_WINDOW {
+        return; // the page window is shown and placed by the window manager
+    }
     let Some(wv) = view() else { return };
     let b = app().browser.lock().unwrap();
     match (b.want_visible, b.bounds) {
@@ -209,6 +242,13 @@ pub fn open_page(key: &str, url: &str) -> Result<(), String> {
         app().browser.lock().unwrap().loaded = true;
     }
     apply();
+    if SEPARATE_WINDOW {
+        if let Some(w) = app().handle.get_webview_window(LABEL) {
+            let _ = w.show();
+            let _ = w.unminimize();
+            let _ = w.set_focus();
+        }
+    }
     start_mem();
     app().push();
     Ok(())
@@ -237,6 +277,9 @@ pub fn set_bounds(rect: Option<(f64, f64, f64, f64)>) {
         }
         b.loaded
     };
+    if SEPARATE_WINDOW {
+        return; // a separate window stays open while you use other sections
+    }
     if rect.is_some() {
         cancel();
         ensure();

@@ -52,7 +52,11 @@ pub async fn do_launch_profile(id: &str, profile: Option<i64>) -> Value {
         g["launchOverride"] = o;
     }
     if g["installed"] == false {
-        let uri = s(&g, "installUri");
+        let mut uri = s(&g, "installUri");
+        // Linux: Epic and GOG games are installed through Heroic (it has no "install this id" link — open the app)
+        if !cfg!(windows) && (uri.starts_with("com.epicgames.launcher:") || uri.starts_with("goggalaxy:")) {
+            uri = "heroic://".into();
+        }
         if uri.is_empty() {
             return err("Неизвестно, как установить эту игру");
         }
@@ -208,20 +212,25 @@ pub fn poll_net(first: bool) {
 
 pub fn on_game_started(id: &str) {
     crate::actions::game_started(id);
+    crate::osd::on_game_started();
 }
 pub fn on_game_ended(id: &str) {
     crate::actions::game_ended(id);
+    crate::osd::on_game_ended();
 }
 pub fn on_download_finished(id: &str) {
     crate::actions::download_finished(id);
 }
 
-fn apply_hotkey() -> bool {
+/// Global hotkeys: show Arcadia + toggle the in-game overlay
+pub fn apply_hotkey() -> bool {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
     let gs = app().handle.global_shortcut();
     let _ = gs.unregister_all();
     let hk = s(&app().store.lock().unwrap().settings, "hotkey");
-    hk.is_empty() || gs.register(hk.as_str()).is_ok()
+    let ok = hk.is_empty() || gs.register(hk.as_str()).is_ok();
+    crate::osd::register_hotkey();
+    ok
 }
 
 fn apply_autostart() {
@@ -292,7 +301,8 @@ async fn dispatch(ch: &str, a: &[Value]) -> Value {
             let before = app.store.lock().unwrap().settings["sources"].clone();
             app.store.lock().unwrap().set_settings(patch.clone());
             let mut hotkey_ok = true;
-            if patch.get("hotkey").is_some() { hotkey_ok = apply_hotkey(); }
+            if patch.get("hotkey").is_some() || patch.get("osd").is_some() { hotkey_ok = apply_hotkey(); }
+            if patch.get("osd").is_some() { crate::osd::refresh(); }
             if patch.get("autostart").is_some() { apply_autostart(); }
             let after = app.store.lock().unwrap().settings["sources"].clone();
             if patch.get("scanFolders").is_some() || (patch.get("sources").is_some() && before != after) { run_scan(); }
@@ -313,6 +323,7 @@ async fn dispatch(ch: &str, a: &[Value]) -> Value {
             ok()
         }
         "app:quit" => { quit(); ok() }
+        "osd:size" => { crate::osd::set_content_size(arg(a, 0).as_f64().unwrap_or(0.0), arg(a, 1).as_f64().unwrap_or(0.0)); ok() }
         "win:minimize" => { if let Some(w) = crate::app::main_window() { let _ = w.minimize(); } ok() }
         "win:maximize" => {
             if let Some(w) = crate::app::main_window() {

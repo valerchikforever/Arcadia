@@ -252,7 +252,8 @@ function monPoll(on) {
     const r = await api.x('monitor-data');
     if (r && r.ok) {
       ui.mon.data = r.hardware;
-      ui.mon.err = '';
+      ui.mon.fps = r.fps || null;
+      ui.mon.err = r.note || '';
       for (const hw of r.hardware) for (const [grp, list] of Object.entries(hw.groups)) for (const s of list) {
         const k = `${hw.name}|${grp}|${s.name}`;
         const v = parseFloat(String(s.value).replace(',', '.'));
@@ -278,23 +279,83 @@ const MON_PICK = {
   disk: [['Temperatures', /./, 'Температура'], ['Load', /used space/i, 'Занято места'], ['Throughput', /read/i, 'Чтение'], ['Throughput', /write/i, 'Запись']],
 };
 const MON_LABEL = { cpu: 'Процессор', gpu: 'Видеокарта', ram: 'Память', disk: 'Диск', board: 'Материнская плата', net: 'Сеть' };
+const OSD_ITEMS = [['fps', 'FPS'], ['frametime', 'Время кадра'], ['low1', '1% low'], ['cpu', 'Загрузка CPU'], ['cputemp', 'Температура CPU'], ['cpuclk', 'Частота CPU'],
+  ['gpu', 'Загрузка GPU'], ['gputemp', 'Температура GPU'], ['gpuclk', 'Частота GPU'], ['gpupower', 'Мощность GPU'], ['vram', 'Видеопамять'], ['ram', 'Память'], ['session', 'Игра и время сессии'], ['clock', 'Часы']];
+const osdCfg = () => ({ enabled: true, autoShow: true, hotkey: 'Shift+F12', position: 'tl', scale: 1, opacity: 0.55, items: [], mangohud: false, linuxWindow: false, ...(S.settings.osd || {}) });
+function setOsd(patch) {
+  S.settings.osd = { ...osdCfg(), ...patch };
+  ui.lastHtml = '';
+  render();
+  api.setSettings({ osd: patch });
+}
+
+function osdPanelHtml() {
+  const o = osdCfg();
+  const vis = S.extras && S.extras.osd && S.extras.osd.visible;
+  const mh = S.extras && S.extras.osd && S.extras.osd.mangohud;
+  const lin = isLinux();
+  const corner = (k, l) => `<button data-act="osd-set" data-k="position" data-v="${k}" class="${o.position === k ? 'on' : ''}" title="${l}"><i class="corner ${k}"></i></button>`;
+  return `<div class="osd-panel">
+    <div class="op-head"><div><h3>${I.tv}Оверлей в игре</h3><div class="d">${lin
+      ? 'В играх, которые запускает Arcadia, показатели рисует MangoHud прямо внутри игры (Vulkan, OpenGL, DXVK под Wine/Proton). Окно-оверлей Arcadia — для игр в окне.'
+      : 'Прозрачная панель поверх игры: FPS, кадр, температуры и загрузка. Ничего не внедряет в игру — безопасно с античитами. Видна в оконном и «полноэкранном без рамки» режимах; в эксклюзивном полноэкранном её закрывает игра.'}</div></div>
+      ${switchHtml('osd.enabled', o.enabled !== false)}</div>
+    ${o.enabled !== false ? `
+    <div class="op-grid">
+      <div class="op-col">
+        <div class="op-k">Что показывать</div>
+        <div class="chips">${OSD_ITEMS.map(([k, l]) => `<button class="chip${o.items.includes(k) ? ' on' : ''}" data-act="osd-item" data-v="${k}">${l}</button>`).join('')}</div>
+      </div>
+      <div class="op-col narrow">
+        <div class="op-k">Угол экрана</div>
+        <div class="corners">${corner('tl', 'Слева сверху')}${corner('tr', 'Справа сверху')}${corner('bl', 'Слева снизу')}${corner('br', 'Справа снизу')}</div>
+        <div class="op-k">Размер · фон</div>
+        <div class="row"><select class="input" data-osd-change="scale">${[0.8, 1, 1.25, 1.5, 2].map((v) => `<option value="${v}" ${Number(o.scale) === v ? 'selected' : ''}>${Math.round(v * 100)}%</option>`).join('')}</select>
+          <input type="range" min="0" max="0.9" step="0.05" value="${o.opacity}" data-osd-change="opacity" title="Прозрачность фона"></div>
+      </div>
+    </div>
+    ${!lin || o.linuxWindow ? `<div class="toggle-row"><div><div class="t">Показывать при запуске игры</div><div class="d">И прятать после выхода. ${lin ? '' : 'Если датчики запускаются без запроса UAC (ниже), они включатся сами.'}</div></div>${switchHtml('osd.autoShow', o.autoShow !== false)}</div>` : ''}
+    <div class="toggle-row"><div><div class="t">Горячая клавиша</div><div class="d">Показать / скрыть в любой момент${lin ? ' (на Wayland глобальные клавиши могут не работать; в MangoHud та же клавиша переключает его панель)' : ''}</div></div>
+      <div class="row"><input class="input hk-input" id="osdHk" value="${esc(o.hotkey || '')}" placeholder="нажмите сочетание" readonly><button class="btn sm" data-act="osd-hk-clear" title="Без клавиши">${I.x}</button></div></div>
+    ${lin ? `
+      <div class="toggle-row"><div><div class="t">MangoHud в играх, запущенных через Arcadia</div><div class="d">${mh ? 'MangoHud установлен' : 'Не найден — установите пакет <code>mangohud</code> (apt, dnf, pacman или Flatpak)'}. Для игр Steam добавьте в «Свойства → Параметры запуска»: <code>mangohud %command%</code>; в Heroic и Lutris — переключатель MangoHud в настройках игры.</div></div>${switchHtml('osd.mangohud', !!o.mangohud)}</div>
+      <div class="toggle-row"><div><div class="t">Окно-оверлей Arcadia</div><div class="d">Для игр в окне (X11). Поверх полноэкранных игр Linux его не пускает — там работает MangoHud</div></div>${switchHtml('osd.linuxWindow', !!o.linuxWindow)}</div>` : ''}
+    <div class="row" style="margin-top:12px">${!lin || o.linuxWindow ? `<button class="btn ${vis ? '' : 'primary'}" data-act="osd-toggle">${vis ? I.x + 'Скрыть оверлей' : I.tv + 'Показать сейчас'}</button>` : ''}
+      ${lin ? `<button class="btn ghost" data-act="mangohud-copy">${I.list}Скопировать настройки MangoHud</button>` : ''}</div>` : ''}
+  </div>`;
+}
+
 function renderMonitor() {
   const m = (S.extras && S.extras.monitor) || {};
-  const head = `<div class="view-head"><h1>Мониторинг</h1><span class="sub">модуль на основе LibreHardwareMonitor</span><span class="grow"></span>
-    ${m.installed ? `${m.running ? `<button class="btn ghost" data-act="mon-stop">${I.power}Остановить датчики</button>` : ''}<button class="btn ghost" data-act="mon-folder">${I.folder}Папка модуля</button>` : ''}</div>`;
-  if (!m.installed) {
-    return head + `<div class="empty"><div class="big-ico">${I.cpu}</div><h2>Модуль мониторинга не установлен</h2>
-      <p>Температуры, загрузка, частоты и энергопотребление процессора, видеокарты, памяти и дисков — как в MSI Afterburner. Модуль скачивается отдельно (около 5 МБ) и не занимает ресурсов, пока выключен.</p>
+  const lin = isLinux();
+  const head = `<div class="view-head"><h1>Мониторинг</h1><span class="sub">${lin ? 'датчики системы' : 'модуль на основе LibreHardwareMonitor и PresentMon'}</span><span class="grow"></span>
+    ${!lin && m.installed ? `${m.running ? `<button class="btn ghost" data-act="mon-stop">${I.power}Остановить датчики</button>` : ''}<button class="btn ghost" data-act="mon-folder">${I.folder}Папка модуля</button>` : ''}</div>`;
+  const panel = osdPanelHtml();
+  let body = '';
+  if (!lin && !m.installed) {
+    body = `<div class="empty"><div class="big-ico">${I.cpu}</div><h2>Модуль мониторинга не установлен</h2>
+      <p>Температуры, загрузка, частоты и энергопотребление процессора, видеокарты, памяти и дисков, а также FPS в играх — как в MSI Afterburner. Модуль скачивается отдельно (около 8 МБ) и не занимает ресурсов, пока выключен.</p>
       ${m.installing ? `<div class="acc-busy">${I.refresh}${esc(m.installing)}</div>` : `<div class="row"><button class="btn primary" data-act="mon-install">${I.download}Установить модуль</button></div>`}
       ${m.error ? `<div class="net-error" style="max-width:520px">${I.alert}<span>${esc(m.error)}</span></div>` : ''}
-      <p class="hint">Датчики процессора и материнской платы требуют прав администратора — Windows спросит разрешение при запуске.</p></div>`;
+      <p class="hint">Без модуля оверлей показывает загрузку процессора, память и видеокарту NVIDIA. Температуры процессора и FPS требуют модуль и прав администратора.</p></div>`;
+  } else {
+    const extra = !lin ? `<div class="mon-bar">
+        ${m.running ? `<span class="ok-dot"></span><span>Датчики работают${m.fps ? (m.helper ? ' · счётчик FPS включён' : '') : ''}</span>` : `<span>Датчики выключены</span><button class="btn sm primary" data-act="mon-start">${I.power}Запустить</button>`}
+        <span class="grow"></span>
+        ${!m.fps ? (m.installing ? `<span class="acc-busy">${I.refresh}${esc(m.installing)}</span>` : `<button class="btn sm" data-act="mon-install">${I.download}Докачать счётчик FPS</button>`) : ''}
+        <label class="mini-switch" title="Один запрос прав сейчас — дальше датчики запускаются без окна UAC (через планировщик заданий Windows)"><input type="checkbox" data-act-change="mon-task" ${m.task ? 'checked' : ''}><span></span>Без запроса UAC</label>
+      </div>${m.error ? `<div class="net-error" style="margin:0 30px 12px">${I.alert}<span>${esc(m.error)}</span></div>` : ''}` : '';
+    const f = ui.mon.fps && (ui.mon.fps.apps || []).slice().sort((a, b) => b.frames - a.frames)[0];
+    const fpsCard = !lin && f ? `<div class="mon-fps"><span class="k">FPS</span><b>${Math.round(f.fps)}</b><span>${esc(f.app)} · кадр ${f.ft} мс · 1% low ${f.low1}</span></div>` : '';
+    const hw = ui.mon.data;
+    const grid = !m.running && !lin ? `<div class="empty small"><p>Запуск попросит права администратора: без них не видны температуры процессора и материнской платы и FPS.</p></div>`
+      : !hw ? `<div class="empty small"><div class="big-ico">${I.refresh}</div><h2>${esc(ui.mon.err || 'Подключаемся к датчикам…')}</h2></div>` : monGridHtml(hw);
+    body = extra + fpsCard + grid;
   }
-  if (!m.running) {
-    return head + `<div class="empty"><div class="big-ico">${I.cpu}</div><h2>Датчики выключены</h2><p>Запуск попросит права администратора: без них не видны температуры процессора и материнской платы.</p>
-      <div class="row"><button class="btn primary" data-act="mon-start">${I.power}Запустить датчики</button></div></div>`;
-  }
-  const hw = ui.mon.data;
-  if (!hw) return head + `<div class="empty"><div class="big-ico">${I.refresh}</div><h2>${esc(ui.mon.err || 'Подключаемся к датчикам…')}</h2></div>`;
+  return head + panel + body;
+}
+
+function monGridHtml(hw) {
   const color = { cpu: '#60a5fa', gpu: '#4ade80', ram: '#c084fc', disk: '#fbbf24', board: '#94a3b8', net: '#22d3ee' };
   const order = ['cpu', 'gpu', 'ram', 'disk', 'board', 'net'];
   const cards = [...hw].sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind)).map((h) => {
@@ -304,11 +365,42 @@ function renderMonitor() {
       if (s && !picks.some((p) => p.label === label)) picks.push({ label, s, grp });
     }
     const metrics = picks.length ? picks : Object.entries(h.groups).slice(0, 2).flatMap(([grp, l]) => l.slice(0, 2).map((s) => ({ label: s.name, s, grp })));
+    const key = `${h.name}`;
     return `<div class="mon-card" style="--c:${color[h.kind] || '#aaa'}"><div class="mc-head"><span class="mc-kind">${esc(MON_LABEL[h.kind] || 'Устройство')}</span><span class="mc-name">${esc(h.name)}</span></div>
       <div class="mc-grid">${metrics.map(({ label, s, grp }) => `<div class="mc-m"><div class="k">${esc(label)}</div><div class="v">${esc(s.value)}</div>${s.max ? `<div class="mx">макс ${esc(s.max)}</div>` : ''}${spark(ui.mon.hist[`${h.name}|${grp}|${s.name}`], color[h.kind] || '#aaa')}</div>`).join('')}</div>
-      <details><summary>Все датчики</summary>${Object.entries(h.groups).map(([g, l]) => `<div class="mc-grp"><b>${esc(g)}</b>${l.map((s) => `<div class="mc-row"><span>${esc(s.name)}</span><span>${esc(s.value)}</span></div>`).join('')}</div>`).join('')}</details></div>`;
+      <details data-key="${esc(key)}" ${(ui.mon.open || {})[key] ? 'open' : ''}><summary>Все датчики</summary>${Object.entries(h.groups).map(([g, l]) => `<div class="mc-grp"><b>${esc(g)}</b>${l.map((s) => `<div class="mc-row"><span>${esc(s.name)}</span><span>${esc(s.value)}</span></div>`).join('')}</div>`).join('')}</details></div>`;
   }).join('');
-  return head + `<div class="mon-grid">${cards}</div><p class="hint" style="padding:0 30px 30px">Счётчик FPS в играх не входит в модуль: для него нужен PresentMon, это следующий шаг.</p>`;
+  return `<div class="mon-grid">${cards}</div>`;
+}
+
+// keyboard shortcut capture for the overlay hotkey ("Shift+F12", "Ctrl+Alt+O")
+document.addEventListener('keydown', (e) => {
+  if (!e.target || e.target.id !== 'osdHk') return;
+  e.preventDefault();
+  if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return;
+  const mods = [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Super'].filter(Boolean);
+  let k = e.code.replace(/^Key/, '').replace(/^Digit/, '');
+  if (/^F\d+$/.test(e.key)) k = e.key;
+  if (!mods.length && !/^F\d+$/.test(k)) return toast('Добавьте Ctrl, Alt или Shift — иначе клавиша будет мешать в игре', 'err');
+  const hk = [...mods, k].join('+');
+  e.target.value = hk;
+  setOsd({ hotkey: hk });
+  toast(`Оверлей: ${hk}`, 'ok');
+}, true);
+document.addEventListener('toggle', (e) => {
+  const d = e.target;
+  if (d.tagName === 'DETAILS' && d.dataset.key) { ui.mon.open = ui.mon.open || {}; ui.mon.open[d.dataset.key] = d.open; }
+}, true);
+
+function linuxPaneHtml() {
+  const l = S.settings.linux || {};
+  const r = l.runner || 'wine';
+  return `<div class="hint" style="margin:0 0 12px">Как запускать игры для Windows (.exe) — например, с торрентов. Игры Steam, Heroic и Lutris запускаются своими лаунчерами с их настройками Proton/Wine.</div>
+    <div class="field"><label>Чем запускать .exe</label><div class="seg wide-seg">${[['wine', 'Wine'], ['umu', 'Proton (umu-run)'], ['custom', 'Своя команда']].map(([k, t]) => `<button data-lx="runner" data-v="${k}" class="${r === k ? 'on' : ''}">${t}</button>`).join('')}</div>
+      <div class="hint">${r === 'umu' ? 'umu-launcher запускает игры через Proton как Steam, но без Steam. Установите пакет umu-launcher.' : r === 'custom' ? 'Например: <code>gamescope -f -- wine</code> или путь к своему Proton. Файл игры и её аргументы добавятся в конец.' : 'Системный Wine (пакет wine). Для DirectX 11/12 установите в префикс DXVK и VKD3D (winetricks dxvk vkd3d).'}</div></div>
+    ${r === 'umu' ? `<div class="field"><label>Версия Proton (PROTONPATH, необязательно)</label><input class="input" data-lx-input="protonPath" value="${esc(l.protonPath || '')}" placeholder="GE-Proton или путь к папке Proton"></div>` : ''}
+    ${r === 'custom' ? `<div class="field"><label>Команда</label><input class="input" data-lx-input="customRunner" value="${esc(l.customRunner || '')}" placeholder="gamescope -f -- wine"></div>` : ''}
+    <div class="field"><label>Префикс Wine (WINEPREFIX, необязательно)</label><input class="input" data-lx-input="winePrefix" value="${esc(l.winePrefix || '')}" placeholder="по умолчанию ~/.wine"></div>`;
 }
 
 // ---------------- settings: integrations & notifications ----------------

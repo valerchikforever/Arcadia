@@ -29,8 +29,22 @@ pub fn state() -> Value {
     let e = EX.lock().unwrap();
     json!({
         "autopick": e.autopick, "torrents": e.torrents, "torrentError": e.torrent_error, "freeGames": e.free_games,
-        "monitor": { "installed": monitor_exe().is_some(), "running": monitor_running(), "installing": e.monitor_installing, "error": e.monitor_error },
+        "monitor": {
+            "installed": monitor_exe().is_some(), "running": monitor_running(), "installing": e.monitor_installing, "error": e.monitor_error,
+            "native": !cfg!(windows), "fps": pm_installed(), "helper": helper_alive(), "task": task_cached(),
+        },
+        "osd": { "visible": crate::osd::visible(), "mangohud": crate::osd::mangohud_path().is_some() },
     })
+}
+
+/// schtasks takes ~50 ms: checked at most every 30 s for the state snapshot
+fn task_cached() -> bool {
+    static C: Lazy<Mutex<(bool, i64)>> = Lazy::new(|| Mutex::new((false, 0)));
+    let mut c = C.lock().unwrap();
+    if now_ms() - c.1 > 30_000 {
+        *c = (task_ok(), now_ms());
+    }
+    c.0
 }
 
 fn settings() -> Value {
@@ -370,21 +384,38 @@ pub async fn torrent_loop() {
     }
 }
 
-// ---------------- hardware monitor module (LibreHardwareMonitor) ----------------
-fn monitor_dir() -> std::path::PathBuf {
+// ---------------- hardware monitor module ----------------
+// Windows: LibreHardwareMonitor (sensors) + PresentMon (FPS), downloaded on demand into modules/monitor and run by
+// the elevated helper (see fps.rs). Linux: sensors are read natively (sensors.rs) — nothing to install.
+pub fn monitor_dir() -> std::path::PathBuf {
     app().data_dir.join("modules").join("monitor")
 }
 
 fn monitor_exe() -> Option<String> {
-    let p = monitor_dir().join("LibreHardwareMonitor.exe");
+    if !cfg!(windows) {
+        return Some(String::new());
+    }
+    let p = monitor_dir().join(crate::fps::LHM_EXE);
     p.exists().then(|| p.to_string_lossy().to_string())
 }
 
-fn monitor_running() -> bool {
+fn pm_installed() -> bool {
+    monitor_dir().join(crate::fps::PM_EXE).exists()
+}
+
+fn lhm_running() -> bool {
     crate::util::winsys::process_names().contains("librehardwaremonitor.exe")
 }
 
-const LHM_PORT: u16 = 8085;
+fn helper_alive() -> bool {
+    crate::fps::read(&monitor_dir()).is_some()
+}
+
+fn monitor_running() -> bool {
+    !cfg!(windows) || lhm_running() || helper_alive()
+}
+
+const LHM_PORT: u16 = crate::sensors::LHM_PORT;
 
 /// LHM settings: web server on, start minimized to tray (it is our sensor backend)
 fn configure_monitor() {
@@ -402,45 +433,100 @@ fn configure_monitor() {
     let _ = std::fs::write(&f, xml);
 }
 
+async fn gh_json(url: &str) -> Result<Value, String> {
+    app().http.get(url).header("User-Agent", "ArcadiaLauncher").header("Accept", "application/vnd.github+json").send().await.map_err(|e| e.to_string())?.json().await.map_err(|e| e.to_string())
+}
+
+async fn gh_download(url: &str) -> Result<Vec<u8>, String> {
+    let r = app().http.get(url).header("User-Agent", "ArcadiaLauncher").send().await.map_err(|e| e.to_string())?;
+    if !r.status().is_success() {
+        return Err(format!("Не удалось скачать ({})", r.status().as_u16()));
+    }
+    r.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
+}
+
+fn set_installing(t: &str) {
+    EX.lock().unwrap().monitor_installing = t.into();
+    app().push();
+}
+
+/// PresentMon console build (one exe) from GameTechDev/PresentMon releases
+async fn install_presentmon() -> Result<(), String> {
+    set_installing("Ищем счётчик FPS (PresentMon)…");
+    let rels = gh_json("https://api.github.com/repos/GameTechDev/PresentMon/releases?per_page=10").await?;
+    let re = regex::Regex::new(r"(?i)^PresentMon-[\d.]+-x64\.exe$").unwrap();
+    let (rel, a) = rels
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|r| r["prerelease"] != true)
+        .find_map(|r| r["assets"].as_array()?.iter().find(|a| re.is_match(&s(a, "name"))).map(|a| (r.clone(), a.clone())))
+        .ok_or("Не найдена консольная версия PresentMon")?;
+    set_installing(&format!("Скачиваем PresentMon {}…", s(&rel, "tag_name")));
+    let bytes = gh_download(&s(&a, "browser_download_url")).await?;
+    let dir = monitor_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let tmp = dir.join("PresentMon.exe.new");
+    std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, dir.join(crate::fps::PM_EXE)).map_err(|e| format!("{} (остановите датчики и повторите)", e))?;
+    Ok(())
+}
+
+async fn install_lhm() -> Result<(), String> {
+    set_installing("Ищем последнюю версию LibreHardwareMonitor…");
+    let rel = gh_json("https://api.github.com/repos/LibreHardwareMonitor/LibreHardwareMonitor/releases/latest").await?;
+    let assets = rel["assets"].as_array().cloned().unwrap_or_default();
+    let pick = |re: &str| { let re = regex::Regex::new(re).unwrap(); assets.iter().find(|a| re.is_match(&s(a, "name"))).cloned() };
+    let a = pick(r"(?i)net4\d*\.zip$").or_else(|| pick(r"(?i)^LibreHardwareMonitor[^/]*\.zip$")).ok_or("Не найден архив LibreHardwareMonitor")?;
+    set_installing(&format!("Скачиваем LibreHardwareMonitor {}…", s(&rel, "tag_name")));
+    let bytes = gh_download(&s(&a, "browser_download_url")).await?;
+    set_installing("Распаковываем…");
+    if lhm_running() {
+        let _ = monitor_stop();
+    }
+    let dir = monitor_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
+    // the archive may keep everything in one top folder — flatten it
+    let names: Vec<String> = (0..zip.len()).filter_map(|i| zip.by_index(i).ok().map(|f| f.name().to_string())).collect();
+    let prefix = names.iter().find(|n| n.to_lowercase().ends_with("librehardwaremonitor.exe")).map(|n| n[..n.len() - "LibreHardwareMonitor.exe".len()].to_string()).unwrap_or_default();
+    for i in 0..zip.len() {
+        let mut f = zip.by_index(i).map_err(|e| e.to_string())?;
+        let name = f.name().to_string();
+        let Some(rel) = name.strip_prefix(&prefix) else { continue };
+        if rel.is_empty() || name.ends_with('/') {
+            continue;
+        }
+        let dest = dir.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+        if let Some(p) = dest.parent() {
+            let _ = std::fs::create_dir_all(p);
+        }
+        let mut out = std::fs::File::create(&dest).map_err(|e| e.to_string())?;
+        std::io::copy(&mut f, &mut out).map_err(|e| e.to_string())?;
+    }
+    if monitor_exe().is_none() {
+        return Err("В архиве нет LibreHardwareMonitor.exe".into());
+    }
+    configure_monitor();
+    Ok(())
+}
+
+/// Installs what is missing: sensors (LHM) and the FPS counter (PresentMon)
 pub async fn monitor_install() -> Result<(), String> {
-    let set = |t: &str| { EX.lock().unwrap().monitor_installing = t.into(); app().push(); };
     EX.lock().unwrap().monitor_error.clear();
     let r: Result<(), String> = async {
-        set("Ищем последнюю версию…");
-        let rel: Value = app().http.get("https://api.github.com/repos/LibreHardwareMonitor/LibreHardwareMonitor/releases/latest").header("User-Agent", "ArcadiaLauncher").header("Accept", "application/vnd.github+json").send().await.map_err(|e| e.to_string())?.json().await.map_err(|e| e.to_string())?;
-        let assets = rel["assets"].as_array().cloned().unwrap_or_default();
-        let pick = |re: &str| { let re = regex::Regex::new(re).unwrap(); assets.iter().find(|a| re.is_match(&s(a, "name"))).cloned() };
-        let a = pick(r"(?i)net4\d*\.zip$").or_else(|| pick(r"(?i)^LibreHardwareMonitor[^/]*\.zip$")).ok_or("Не найден архив LibreHardwareMonitor")?;
-        set(&format!("Скачиваем LibreHardwareMonitor {}…", s(&rel, "tag_name")));
-        let bytes = app().http.get(s(&a, "browser_download_url")).header("User-Agent", "ArcadiaLauncher").send().await.map_err(|e| e.to_string())?.bytes().await.map_err(|e| e.to_string())?;
-        set("Распаковываем…");
-        if monitor_running() {
-            let _ = run_elevated("Stop-Process -Name LibreHardwareMonitor -Force", true);
-        }
-        let dir = monitor_dir();
-        let _ = std::fs::create_dir_all(&dir);
-        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
-        // the archive may keep everything in one top folder — flatten it
-        let names: Vec<String> = (0..zip.len()).filter_map(|i| zip.by_index(i).ok().map(|f| f.name().to_string())).collect();
-        let prefix = names.iter().find(|n| n.to_lowercase().ends_with("librehardwaremonitor.exe")).map(|n| n[..n.len() - "LibreHardwareMonitor.exe".len()].to_string()).unwrap_or_default();
-        for i in 0..zip.len() {
-            let mut f = zip.by_index(i).map_err(|e| e.to_string())?;
-            let name = f.name().to_string();
-            let Some(rel) = name.strip_prefix(&prefix) else { continue };
-            if rel.is_empty() || name.ends_with('/') {
-                continue;
-            }
-            let dest = dir.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
-            if let Some(p) = dest.parent() {
-                let _ = std::fs::create_dir_all(p);
-            }
-            let mut out = std::fs::File::create(&dest).map_err(|e| e.to_string())?;
-            std::io::copy(&mut f, &mut out).map_err(|e| e.to_string())?;
+        if !cfg!(windows) {
+            return Ok(());
         }
         if monitor_exe().is_none() {
-            return Err("В архиве нет LibreHardwareMonitor.exe".into());
+            install_lhm().await?;
         }
-        configure_monitor();
+        if !pm_installed() {
+            // sensors work without it, so a failure here is only a note
+            if let Err(e) = install_presentmon().await {
+                EX.lock().unwrap().monitor_error = format!("Датчики установлены, но счётчик FPS не скачался: {}", e);
+            }
+        }
         Ok(())
     }
     .await;
@@ -452,21 +538,86 @@ pub async fn monitor_install() -> Result<(), String> {
     r
 }
 
+const TASK: &str = r"\Arcadia\Sensors";
+
+fn exe_path() -> String {
+    std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
+}
+
+/// Is the "no UAC" scheduled task registered for this Arcadia.exe?
+fn task_ok() -> bool {
+    cfg!(windows) && s(&settings()["monitor"], "taskExe") == exe_path() && quiet("schtasks.exe").args(["/query", "/tn", TASK]).output().map(|o| o.status.success()).unwrap_or(false)
+}
+
+/// One UAC prompt now, none later: a scheduled task with highest privileges that starts the helper
+pub fn monitor_task(enable: bool) -> Result<(), String> {
+    if !cfg!(windows) {
+        return Ok(());
+    }
+    let script = if enable {
+        let args = format!("--monitor-helper \"{}\" 0", monitor_dir().display());
+        format!(
+            "$a = New-ScheduledTaskAction -Execute {} -Argument {} -WorkingDirectory {}\n\
+             $p = New-ScheduledTaskPrincipal -UserId \"$env:USERDOMAIN\\$env:USERNAME\" -LogonType Interactive -RunLevel Highest\n\
+             $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew\n\
+             Register-ScheduledTask -TaskName 'Sensors' -TaskPath '\\Arcadia\\' -Action $a -Principal $p -Settings $s -Force | Out-Null",
+            ps_quote(&exe_path()), ps_quote(&args), ps_quote(&monitor_dir().to_string_lossy())
+        )
+    } else {
+        "Unregister-ScheduledTask -TaskName 'Sensors' -TaskPath '\\Arcadia\\' -Confirm:$false".to_string()
+    };
+    run_elevated(&script, true)?;
+    app().store.lock().unwrap().set_settings(json!({ "monitor": { "taskExe": if enable { exe_path() } else { String::new() } } }));
+    if enable && !task_ok() {
+        return Err("Задача не создалась — датчики будут запрашивать права при каждом запуске".into());
+    }
+    app().push();
+    Ok(())
+}
+
 pub fn monitor_start() -> Result<(), String> {
-    let exe = monitor_exe().ok_or("Модуль мониторинга не установлен")?;
+    if !cfg!(windows) || helper_alive() {
+        return Ok(());
+    }
+    monitor_exe().ok_or("Модуль мониторинга не установлен")?;
     configure_monitor();
-    // LHM asks for administrator rights itself (it needs them for CPU / motherboard sensors)
-    shell_exec("open", &exe, "", &crate::util::common::parent(&exe), false, false)
+    let dir = monitor_dir();
+    let _ = std::fs::remove_file(dir.join("stop.flag"));
+    if task_ok() && quiet("schtasks.exe").args(["/run", "/tn", TASK]).output().map(|o| o.status.success()).unwrap_or(false) {
+        return Ok(());
+    }
+    // one UAC prompt: the helper runs LHM and PresentMon with administrator rights
+    let params = format!("--monitor-helper \"{}\" {}", dir.display(), std::process::id());
+    shell_exec("runas", &exe_path(), &params, &dir.to_string_lossy(), false, false)
+}
+
+/// At game start: start sensors only if that needs no prompt
+pub fn monitor_autostart_quiet() {
+    if cfg!(windows) && !helper_alive() && monitor_exe().is_some() && task_ok() {
+        let _ = monitor_start();
+    }
 }
 
 pub fn monitor_stop() -> Result<(), String> {
-    if !monitor_running() {
+    if !cfg!(windows) {
         return Ok(());
     }
-    let _ = quiet("taskkill.exe").args(["/IM", "LibreHardwareMonitor.exe"]).output();
-    std::thread::sleep(std::time::Duration::from_millis(800));
-    if monitor_running() {
-        run_elevated("Stop-Process -Name LibreHardwareMonitor -Force", true)?;
+    let dir = monitor_dir();
+    if helper_alive() {
+        let _ = std::fs::write(dir.join("stop.flag"), "1");
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            if !helper_alive() && !lhm_running() {
+                return Ok(());
+            }
+        }
+    }
+    if lhm_running() {
+        let _ = quiet("taskkill.exe").args(["/IM", "LibreHardwareMonitor.exe"]).output();
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        if lhm_running() {
+            run_elevated("Stop-Process -Name LibreHardwareMonitor -Force", true)?;
+        }
     }
     Ok(())
 }
@@ -505,13 +656,16 @@ pub fn parse_lhm(tree: &Value) -> Vec<Value> {
 }
 
 pub async fn monitor_data() -> Value {
-    match LOCAL.get(format!("http://127.0.0.1:{}/data.json", LHM_PORT)).send().await {
-        Ok(r) => match r.json::<Value>().await {
-            Ok(t) => json!({ "ok": true, "hardware": parse_lhm(&t) }),
-            Err(_) => json!({ "ok": false, "error": "Датчики отвечают в неизвестном формате" }),
-        },
-        Err(_) => json!({ "ok": false, "error": if monitor_running() { "Датчики запускаются…" } else { "Датчики не запущены" } }),
+    let mut r = crate::sensors::read().await;
+    if cfg!(windows) {
+        if let Some(f) = crate::fps::read(&monitor_dir()) {
+            r["fps"] = f;
+        }
+        if r["source"] != "lhm" && monitor_running() {
+            r["note"] = json!("Датчики запускаются…");
+        }
     }
+    r
 }
 
 // ---------------- commands ----------------
@@ -543,6 +697,14 @@ pub async fn dispatch(ch: &str, a: &[Value]) -> Value {
         "monitor-start" => res(tauri::async_runtime::spawn_blocking(monitor_start).await.unwrap_or(Err("ошибка".into()))),
         "monitor-stop" => res(tauri::async_runtime::spawn_blocking(monitor_stop).await.unwrap_or(Err("ошибка".into()))),
         "monitor-data" => monitor_data().await,
+        "monitor-task" => {
+            let on = arg(0) == true;
+            let r = tauri::async_runtime::spawn_blocking(move || monitor_task(on)).await.unwrap_or(Err("ошибка".into()));
+            res(r)
+        }
+        "osd-toggle" => { crate::osd::toggle(); json!({ "ok": true, "visible": crate::osd::visible() }) }
+        "osd-refresh" => { crate::osd::refresh(); crate::osd::register_hotkey_again(); json!({ "ok": true }) }
+        "mangohud-config" => json!({ "ok": true, "config": crate::osd::mangohud_config(&crate::osd::settings()), "installed": crate::osd::mangohud_path().is_some() }),
         "monitor-folder" => { let _ = crate::util::winsys::open(&monitor_dir().to_string_lossy()); json!({ "ok": true }) }
         _ => json!({ "ok": false, "error": format!("Неизвестная команда {}", ch) }),
     }

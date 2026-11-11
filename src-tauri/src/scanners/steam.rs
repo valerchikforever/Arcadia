@@ -27,8 +27,16 @@ pub fn find_steam_path(ctx: &Ctx) -> Option<String> {
     if let Some(k) = ctx.reg.get(r"HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Valve\Steam") {
         c.extend(k.values.get("InstallPath").cloned());
     }
-    c.push(r"C:\Program Files (x86)\Steam".into());
-    c.push(r"C:\Program Files\Steam".into());
+    if cfg!(windows) {
+        c.push(r"C:\Program Files (x86)\Steam".into());
+        c.push(r"C:\Program Files\Steam".into());
+    } else {
+        // native package, Flatpak, Snap
+        let h = crate::util::linux::home();
+        for p in [".steam/steam", ".local/share/Steam", ".steam/root", ".var/app/com.valvesoftware.Steam/.local/share/Steam", "snap/steam/common/.local/share/Steam"] {
+            c.push(format!("{}/{}", h, p));
+        }
+    }
     c.into_iter().map(|p| fix_path(&p)).find(|p| exists(&join(p, "steamapps")))
 }
 
@@ -56,8 +64,10 @@ pub fn library_folders(steam: &str) -> Vec<String> {
             }
         }
     }
+    // on Linux ~/.steam/steam is a symlink to ~/.local/share/Steam: compare real folders
+    let real = |l: &str| if cfg!(windows) { l.to_lowercase() } else { fs::canonicalize(l).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| l.to_string()) };
     let mut seen = HashSet::new();
-    libs.into_iter().filter(|l| seen.insert(l.to_lowercase()) && exists(&join(l, "steamapps"))).collect()
+    libs.into_iter().filter(|l| seen.insert(real(l)) && exists(&join(l, "steamapps"))).collect()
 }
 
 /// Steam's own playtime from the most recently used local profile: appid -> (seconds, lastPlayed ms)

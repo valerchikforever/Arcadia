@@ -248,5 +248,8 @@ pub fn logout(key: &str) {
 }
 
 pub fn launcher_uri(key: &str) -> String {
+    if !cfg!(windows) && (key == "epic" || key == "gog") {
+        return "heroic://".into();
+    }
     service(key).map(|s| s.launcher.to_string()).unwrap_or_default()
 }
