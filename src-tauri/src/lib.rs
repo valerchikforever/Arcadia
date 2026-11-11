@@ -27,6 +27,11 @@ pub fn run_helper_mode() -> Option<i32> {
 }
 
 pub fn run() {
+    // Linux + NVIDIA: WebKitGTK's DMA-BUF renderer often shows a blank window there — use the stable path
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() && std::path::Path::new("/proc/driver/nvidia").exists() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
     let hidden = std::env::args().any(|a| a == "--hidden");
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| app::show_window()))

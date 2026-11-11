@@ -1,0 +1,22 @@
+# Arch Linux package from the release .deb:  makepkg -si
+pkgname=arcadia-bin
+pkgver=2.1.0
+pkgrel=1
+pkgdesc="Arcadia — единый лаунчер игр: Steam, Heroic, Lutris, папки; оверлей, zapret, VPN"
+arch=('x86_64')
+url="https://github.com/valerchikforever/Arcadia"
+license=('unknown')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator')
+optdepends=('mangohud: показатели внутри игры'
+            'wine: запуск Windows-игр с торрентов'
+            'umu-launcher: запуск Windows-игр через Proton'
+            'power-profiles-daemon: режим производительности на время игры'
+            'polkit: включение zapret и режима TUN у VPN')
+provides=('arcadia')
+conflicts=('arcadia')
+source=("arcadia_${pkgver}_amd64.deb::${url}/releases/download/v${pkgver}/arcadia_${pkgver}_amd64.deb")
+sha256sums=('SKIP')
+
+package() {
+  bsdtar -xf data.tar.* -C "$pkgdir"
+}

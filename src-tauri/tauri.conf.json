@@ -24,6 +24,7 @@
     "targets": [
       "nsis",
       "deb",
+      "rpm",
       "appimage"
     ],
     "icon": [
@@ -55,6 +56,9 @@
       },
       "appimage": {
         "bundleMediaFramework": false
+      },
+      "rpm": {
+        "release": "1"
       }
     }
   }

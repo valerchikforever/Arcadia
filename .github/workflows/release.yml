@@ -1,7 +1,8 @@
 name: Release
 
-# Push a tag like v2.1.0 (or run it by hand) → Windows and Linux builds → one GitHub Release with
-# the Windows installer + portable zip and the Linux .deb + AppImage.
+# Push a tag like v2.1.0 (or run it by hand) → Windows and Linux builds → Arcadia is installed and started
+# in clean Arch Linux and Fedora containers → one GitHub Release with the Windows installer + portable zip
+# and the Linux .deb, .rpm and AppImage (only if every step passed).
 # Release text: .github/release-notes/<tag>.md (optional).
 on:
   push:
@@ -79,21 +80,76 @@ jobs:
       - name: Tests
         working-directory: src-tauri
         run: cargo test --lib
-      - name: Build .deb and AppImage
-        run: npx tauri build --bundles deb,appimage
+      - name: Build .deb, .rpm and AppImage
+        run: npx tauri build --bundles deb,rpm,appimage
       - name: Collect files
         run: |
           v="${TAG#v}"
           mkdir -p out
           cp src-tauri/target/release/bundle/deb/*.deb "out/arcadia_${v}_amd64.deb"
+          cp src-tauri/target/release/bundle/rpm/*.rpm "out/arcadia-${v}-1.x86_64.rpm"
           cp src-tauri/target/release/bundle/appimage/*.AppImage "out/Arcadia-${v}-x86_64.AppImage"
       - uses: actions/upload-artifact@v4
         with:
           name: linux
           path: out/*
 
+  # install and start it like a user would, on distributions other than the build machine
+  distro-test:
+    needs: linux
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [archlinux, fedora]
+    container: ${{ matrix.distro == 'archlinux' && 'archlinux:latest' || 'fedora:latest' }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux
+          path: pkg
+      - name: Install (Arch — package from the .deb, like packaging/arch/PKGBUILD)
+        if: matrix.distro == 'archlinux'
+        run: |
+          pacman -Syu --noconfirm webkit2gtk-4.1 gtk3 libayatana-appindicator xorg-server-xvfb imagemagick procps-ng libarchive ttf-dejavu
+          mkdir deb && cd deb && bsdtar -xf ../pkg/*.deb && bsdtar -xf data.tar.* -C /
+      - name: Install (Fedora — the .rpm with its dependencies)
+        if: matrix.distro == 'fedora'
+        run: |
+          dnf install -y ./pkg/*.rpm xorg-x11-server-Xvfb ImageMagick procps-ng dejavu-sans-fonts
+          rpm -qR arcadia | grep -i -E "webkit|gtk" || true
+      - name: Start Arcadia (installed package)
+        run: |
+          set -x
+          ldd /usr/bin/Arcadia | grep "not found" && exit 1 || true
+          Xvfb :99 -screen 0 1400x900x24 & sleep 2
+          export DISPLAY=:99 ARCADIA_DATA=$PWD/data
+          /usr/bin/Arcadia > app.log 2>&1 & PID=$!
+          sleep 25
+          import -window root shot-${{ matrix.distro }}.png || true
+          if ! kill -0 $PID; then echo "Arcadia exited"; cat app.log; exit 1; fi
+          kill $PID; cat app.log | tail -20
+          ls -la data || true
+      - name: Start the AppImage
+        run: |
+          chmod +x pkg/*.AppImage
+          export DISPLAY=:99 ARCADIA_DATA=$PWD/data2 APPIMAGE_EXTRACT_AND_RUN=1
+          pgrep Xvfb || (Xvfb :99 -screen 0 1400x900x24 & sleep 2)
+          ./pkg/*.AppImage > appimage.log 2>&1 & PID=$!
+          sleep 25
+          import -window root appimage-${{ matrix.distro }}.png || true
+          if ! kill -0 $PID; then echo "AppImage exited"; cat appimage.log; exit 1; fi
+          kill $PID; tail -20 appimage.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-${{ matrix.distro }}
+          path: |
+            *.png
+            *.log
+
   publish:
-    needs: [windows, linux]
+    needs: [windows, linux, distro-test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -101,6 +157,7 @@ jobs:
           ref: ${{ env.REF }}
       - uses: actions/download-artifact@v4
         with:
+          pattern: '{windows,linux}'
           path: out
           merge-multiple: true
       - name: Release notes

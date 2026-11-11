@@ -130,7 +130,13 @@
 - **Страницы магазинов** открываются отдельным окном (встроить их в окно Arcadia WebKitGTK не позволяет).
 - Глобальные горячие клавиши работают в X11; в Wayland — зависит от окружения.
 
-Установка: `sudo apt install ./arcadia_2.1.0_amd64.deb` (Debian, Ubuntu, Mint) или `Arcadia-2.1.0-x86_64.AppImage` — сделайте файл исполняемым и запустите (любой дистрибутив). Нужны WebKitGTK 4.1 и GTK 3 — они есть в любом современном дистрибутиве. Данные хранятся в `~/.config/Arcadia`.
+Установка:
+- Debian, Ubuntu, Mint: `sudo apt install ./arcadia_2.1.0_amd64.deb`
+- Fedora: `sudo dnf install ./arcadia-2.1.0-1.x86_64.rpm`
+- Arch, Manjaro, EndeavourOS: `makepkg -si` в папке с [`packaging/arch/PKGBUILD`](packaging/arch/PKGBUILD) (собирает пакет из .deb выпуска; зависимости — `webkit2gtk-4.1 gtk3 libayatana-appindicator`)
+- Любой дистрибутив: `Arcadia-2.1.0-x86_64.AppImage` — сделайте файл исполняемым и запустите (нужен `fuse2`; без него — `./Arcadia-*.AppImage --appimage-extract-and-run`)
+
+Пакеты собираются на Ubuntu 22.04 (glibc 2.35), поэтому работают на всех актуальных дистрибутивах. Перед каждым выпуском автосборка ставит и запускает Arcadia в чистых Arch Linux и Fedora. Нужны WebKitGTK 4.1 и GTK 3 — они есть в любом современном дистрибутиве. Данные хранятся в `~/.config/Arcadia`.
 
 ## Установка (Windows)
 
