@@ -625,3 +625,32 @@ select.input { background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http:
 .mon-card:hover .mc-hide { opacity: 1; }
 .mc-hide:hover { background: var(--panel-2); color: var(--text); }
 .mini-seg button { padding: 5px 10px; font-size: 12.5px; }
+
+/* ---------- AI ---------- */
+.ai-vpnbar { display: flex; align-items: center; gap: 10px; margin: 0 30px 14px; padding: 10px 14px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line)); background: color-mix(in srgb, var(--warn) 8%, var(--bg-2)); font-size: 13px; color: var(--text-2); }
+.ai-vpnbar svg { width: 17px; height: 17px; color: var(--warn); flex: none; }
+.ai-vpnbar.on { border-color: color-mix(in srgb, var(--ok) 35%, var(--line)); background: color-mix(in srgb, var(--ok) 7%, var(--bg-2)); }
+.ai-vpnbar.on svg { color: var(--ok); }
+.ai-cats { margin: 0 30px 14px; align-items: center; }
+.ai-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; padding: 0 30px 16px; }
+.ai-card { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: var(--radius); background: var(--panel); border: 1px solid var(--line); transition: border-color .15s, transform .15s; cursor: default; }
+.ai-card:hover { border-color: var(--line-2); transform: translateY(-1px); }
+.ai-card.open { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.ai-top { display: flex; align-items: center; gap: 12px; }
+.ai-logo { position: relative; width: 42px; height: 42px; border-radius: 11px; flex: none; overflow: hidden; display: grid; place-items: center;
+  background: linear-gradient(135deg, hsl(var(--h) 55% 45%), hsl(calc(var(--h) + 40) 60% 30%)); font: 700 19px var(--font-d); color: #fff; }
+.ai-logo img { position: absolute; inset: 7px; width: 28px; height: 28px; border-radius: 6px; background: #fff; padding: 2px; object-fit: contain; }
+.ai-t { min-width: 0; flex: 1; }
+.ai-name { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 6px; }
+.ai-by { color: var(--text-3); font-size: 12px; }
+.ai-open-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.ai-more { opacity: .55; }
+.ai-card:hover .ai-more { opacity: 1; }
+.ai-desc { color: var(--text-2); font-size: 13px; line-height: 1.4; flex: 1; }
+.ai-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ai-vpn { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 3px 9px; border-radius: 99px; }
+.ai-vpn svg { width: 13px; height: 13px; }
+.ai-vpn.free { color: var(--text-3); background: var(--panel-2); }
+.ai-vpn.need { color: var(--warn); background: color-mix(in srgb, var(--warn) 13%, transparent); }
+.ai-vpn.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 13%, transparent); }
+.ai-vpn { white-space: nowrap; }

@@ -1,6 +1,6 @@
 # Arch Linux package from the release .deb:  makepkg -si
 pkgname=arcadia-bin
-pkgver=2.1.1
+pkgver=2.2.0
 pkgrel=1
 pkgdesc="Arcadia — единый лаунчер игр: Steam, Heroic, Lutris, папки; оверлей, zapret, VPN"
 arch=('x86_64')

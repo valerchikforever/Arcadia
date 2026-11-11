@@ -56,6 +56,11 @@
 
 **Загрузки торрентов** — через веб-интерфейс qBittorrent («Настройки → Интеграции»): прогресс, скорость и оставшееся время в разделе «Загрузки». Если торрент сохраняется в папку из «Настройки → Библиотека», после загрузки игра сама появляется в библиотеке.
 
+**ИИ** — раздел со всеми популярными ИИ-сервисами: ChatGPT, Claude, Gemini, Copilot, Grok, Perplexity, DeepSeek, Qwen, Le Chat, GigaChat, Алиса, NotebookLM, Sora, Midjourney, Suno, ElevenLabs и другие (около 30), с фильтром по категориям и своими сервисами.
+- Открываются в отдельном окне Arcadia (общий профиль — один вход через Google/Microsoft на все) или в браузере.
+- Сервисы, которые не работают в России и СНГ или блокируют такие аккаунты (ChatGPT, Claude, Gemini, Copilot, Grok, Meta AI, NotebookLM, Sora, Suno и др.), **открываются только с включённым VPN**: Arcadia предложит включить его одной кнопкой. Если VPN отключится, окна этих сервисов закрываются, чтобы они не увидели настоящий адрес.
+- Пометку «Нужен VPN» можно изменить у любого сервиса (меню ⋯ на карточке).
+
 **Мониторинг железа и оверлей в игре** — раздел «Мониторинг».
 - Windows: модуль скачивается по кнопке (~8 МБ) в `%APPDATA%\Arcadia\modules\monitor` — LibreHardwareMonitor (датчики) и PresentMon от Intel (FPS). Температуры, загрузка, частоты, мощность и вентиляторы процессора, видеокарты, памяти и дисков с графиками. Запуск датчиков один раз спрашивает права администратора; переключатель «Без запроса UAC» создаёт задачу в планировщике Windows, и дальше датчики включаются без окна UAC (в том числе сами при запуске игры).
 - Linux: датчики читаются напрямую из системы (hwmon, amdgpu, nvidia-smi, /proc) — ставить ничего не нужно, прав администратора тоже.
@@ -131,17 +136,17 @@
 - Глобальные горячие клавиши работают в X11; в Wayland — зависит от окружения.
 
 Установка:
-- Debian, Ubuntu, Mint: `sudo apt install ./arcadia_2.1.0_amd64.deb`
-- Fedora: `sudo dnf install ./arcadia-2.1.0-1.x86_64.rpm`
+- Debian, Ubuntu, Mint: `sudo apt install ./arcadia_2.2.0_amd64.deb`
+- Fedora: `sudo dnf install ./arcadia-2.2.0-1.x86_64.rpm`
 - Arch, Manjaro, EndeavourOS: `makepkg -si` в папке с [`packaging/arch/PKGBUILD`](packaging/arch/PKGBUILD) (собирает пакет из .deb выпуска; зависимости — `webkit2gtk-4.1 gtk3 libayatana-appindicator`)
-- Любой дистрибутив: `Arcadia-2.1.0-x86_64.AppImage` — сделайте файл исполняемым и запустите (нужен `fuse2`; без него — `./Arcadia-*.AppImage --appimage-extract-and-run`)
+- Любой дистрибутив: `Arcadia-2.2.0-x86_64.AppImage` — сделайте файл исполняемым и запустите (нужен `fuse2`; без него — `./Arcadia-*.AppImage --appimage-extract-and-run`)
 
 Пакеты собираются на Ubuntu 22.04 (glibc 2.35), поэтому работают на всех актуальных дистрибутивах. Перед каждым выпуском автосборка ставит и запускает Arcadia в чистых Arch Linux и Fedora. Нужны WebKitGTK 4.1 и GTK 3 — они есть в любом современном дистрибутиве. Данные хранятся в `~/.config/Arcadia`.
 
 ## Установка (Windows)
 
-- `Arcadia-Setup-2.1.0.exe` — установщик (ставится для текущего пользователя, без прав администратора; ярлыки в меню «Пуск» и на рабочем столе, удаление через «Приложения»).
-- `Arcadia-Portable-2.1.0.zip` — портативная версия: распакуйте в любую папку и запустите `Arcadia.exe`. Данные всё равно хранятся в `%APPDATA%\Arcadia`.
+- `Arcadia-Setup-2.2.0.exe` — установщик (ставится для текущего пользователя, без прав администратора; ярлыки в меню «Пуск» и на рабочем столе, удаление через «Приложения»).
+- `Arcadia-Portable-2.2.0.zip` — портативная версия: распакуйте в любую папку и запустите `Arcadia.exe`. Данные всё равно хранятся в `%APPDATA%\Arcadia`.
 
 Нужен WebView2 Runtime — он встроен в Windows 11 и обновлённую Windows 10; если его нет, установщик скачает его сам. Windows SmartScreen может предупредить, что приложение без цифровой подписи — «Подробнее» → «Выполнить в любом случае».
 
@@ -180,9 +185,10 @@ src-tauri/src/discord.rs      статус Discord
 src-tauri/src/sensors.rs      датчики (LHM в Windows, sysfs/proc/nvidia-smi в Linux)
 src-tauri/src/fps.rs          FPS через PresentMon: помощник с правами администратора
 src-tauri/src/osd.rs          оверлей в игре, MangoHud
+src-tauri/src/ai.rs           окна ИИ-сервисов и защита VPN
 src-tauri/src/util/linux.rs   Linux: папки XDG, Wine-пути, pkexec
 src-tauri/src/meta.rs, tracker.rs, installs.rs, launch.rs, store.rs
-ui/                           интерфейс (app.js, features.js, net.js, store.js, styles.css; osd.html — оверлей)
+ui/                           интерфейс (app.js, features.js, ai.js, net.js, store.js, styles.css; osd.html — оверлей)
 ```
 
 ## Ограничения

@@ -57,6 +57,7 @@
       open: call('br:open'), bounds: call('br:bounds'), nav: call('br:nav'), unload: call('br:unload'),
       disable: call('br:disable'), external: call('br:external'), set: call('br:set'), full: call('br:full'),
     },
+    ai: { open: call('ai:open') },
     // extra features: api.x('name', ...args)
     x: (name, ...a) => invoke('x:' + name, ...a),
     fileUrl: (p, v) => (p ? T.core.convertFileSrc(p) + (v ? `?v=${v}` : '') : ''),

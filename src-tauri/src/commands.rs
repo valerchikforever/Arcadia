@@ -182,7 +182,7 @@ pub fn poll_net(first: bool) {
     let a = app();
     {
         let mut z = a.zapret.lock().unwrap();
-        let r = names.contains("winws.exe");
+        let r = if cfg!(windows) { names.contains("winws.exe") } else { names.contains("nfqws") || names.contains("tpws") };
         if r != z.running && !z.busy {
             z.running = r;
             drop(z);
@@ -207,6 +207,7 @@ pub fn poll_net(first: bool) {
         }
         a.push();
     }
+    crate::ai::guard();
     crate::actions::tick_schedules();
 }
 
@@ -323,6 +324,7 @@ async fn dispatch(ch: &str, a: &[Value]) -> Value {
             ok()
         }
         "app:quit" => { quit(); ok() }
+        "ai:open" => { let r = crate::ai::open(&arg(a, 0)); app.push(); r }
         "osd:size" => { crate::osd::set_content_size(arg(a, 0).as_f64().unwrap_or(0.0), arg(a, 1).as_f64().unwrap_or(0.0)); ok() }
         "win:minimize" => { if let Some(w) = crate::app::main_window() { let _ = w.minimize(); } ok() }
         "win:maximize" => {

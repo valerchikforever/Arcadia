@@ -31,6 +31,7 @@ pub fn default_settings() -> Value {
         "syncAccountsOnStart": true,
         "browser": { "economy": true, "blockTrackers": true, "autoEnable": false, "unloadOnMinimizeSec": 60, "unloadOnLeaveSec": 30 },
         "osd": crate::osd::defaults(),
+        "ai": { "mode": "window", "custom": [], "vpn": {}, "hidden": [] },
         "monitor": { "taskExe": "" },
         "linux": { "runner": "wine", "winePrefix": "", "protonPath": "", "customRunner": "" },
         "notify": { "downloads": true, "freeGames": true, "wishlist": true, "vpn": true, "torrents": true, "zapret": true, "test": true },

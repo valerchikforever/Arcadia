@@ -139,6 +139,7 @@ function viewTitle(view) {
   if (view === 'store') return 'Магазины';
   if (view === 'stats') return 'Статистика';
   if (view === 'monitor') return 'Мониторинг';
+  if (view === 'ai') return 'ИИ';
   if (view.startsWith('src:')) return (SOURCES[view.slice(4)] || {}).label || view.slice(4);
   if (view.startsWith('col:')) { const c = S.collections.find((x) => x.id === view.slice(4)); return c ? c.name : 'Коллекция'; }
   return '';
@@ -164,6 +165,7 @@ function renderNav() {
   if (dl + tdl || (S.settings.torrent && S.settings.torrent.enabled)) html += navItem('downloads', I.download, 'Загрузки', dl + tdl ? `<span class="dl-dot"></span>${dl + tdl}` : undefined);
   if (unin && !S.settings.hideUninstalled) html += navItem('uninstalled', I.store, 'Не установлены', unin);
   html += navItem('stats', I.chart, 'Статистика');
+  html += navItem('ai', I.bot, 'ИИ', (S.aiOpen || []).length ? `<span class="dl-dot on"></span>${S.aiOpen.length}` : undefined);
   html += navItem('monitor', I.cpu, 'Мониторинг', S.extras && S.extras.monitor && S.extras.monitor.running ? '<span class="dl-dot on"></span>' : undefined);
   const hid = all.filter((g) => g.hidden).length;
   if (hid) html += navItem('hidden', I.eyeOff, 'Скрытые', hid);
@@ -433,6 +435,7 @@ function render() {
   else if (ui.view === 'stats') html = renderStats();
   else if (ui.view === 'store') html = renderStore();
   else if (ui.view === 'monitor') html = renderMonitor();
+  else if (ui.view === 'ai') html = renderAi();
   else html = renderLibrary();
   if (html !== ui.lastHtml) {
     const top = view.scrollTop;

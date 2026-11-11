@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod ai;
 pub mod actions;
 pub mod app;
 pub mod browser;
