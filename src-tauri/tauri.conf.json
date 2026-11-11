@@ -51,11 +51,6 @@
     "longDescription": "Единая библиотека игр из Steam, Epic, GOG, Heroic, Lutris, других лаунчеров и папок с торрентами: учёт времени, обложки, коллекции, оверлей с FPS и датчиками, zapret и VPN.",
     "linux": {
       "deb": {
-        "depends": [
-          "libwebkit2gtk-4.1-0",
-          "libgtk-3-0",
-          "libayatana-appindicator3-1"
-        ],
         "section": "games"
       },
       "appimage": {
